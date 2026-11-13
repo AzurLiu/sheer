@@ -23,12 +23,14 @@ final class WallpaperProvider {
         let id: CGDirectDisplayID
         let size: CGSize
         let scale: CGFloat
+        let colorSpace: CGColorSpace?
         let defaultURL: URL?
         let opts: [NSWorkspace.DesktopImageOptionKey: Any]
         init(_ screen: NSScreen) {
             id = screen.displayID
             size = screen.frame.size
             scale = screen.backingScaleFactor
+            colorSpace = screen.colorSpace?.cgColorSpace
             defaultURL = NSWorkspace.shared.desktopImageURL(for: screen)
             opts = NSWorkspace.shared.desktopImageOptions(for: screen) ?? [:]
         }
@@ -236,7 +238,10 @@ final class WallpaperProvider {
         let h = (y1 - y0) / k
         ctx.draw(part, in: CGRect(x: drawn.minX * scale, y: (barHeight - top - h) * scale,
                                   width: drawn.width * scale, height: h * scale))
-        guard let img = ctx.makeImage() else { return nil }
+        // The desktop shows a wallpaper's sRGB values unconverted on the display's own (wider) gamut,
+        // so it looks more saturated than a colour-managed copy. Tag the strip the same way to match it.
+        guard let made = ctx.makeImage() else { return nil }
+        let img = screen.colorSpace.flatMap { made.copy(colorSpace: $0) } ?? made
         fileCache[screen.id] = (key, img)
         return img
     }
