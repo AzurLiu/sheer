@@ -233,7 +233,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func menuBar(for id: CGDirectDisplayID, in bars: [SystemMenuBar]) -> SystemMenuBar? {
         let db = CGDisplayBounds(id)
-        return bars.first { abs($0.bounds.minX - db.minX) < 1 && abs($0.bounds.width - db.width) < 2 }
+        // A full-screen app in another Space keeps its own (off-screen) "Menubar" window with the
+        // same frame, so prefer the one that is actually on screen.
+        let matches = bars.filter { abs($0.bounds.minX - db.minX) < 1 && abs($0.bounds.width - db.width) < 2 }
+        return matches.first(where: \.onScreen) ?? matches.first
     }
 
     private func barHeight(for screen: NSScreen, bars: [SystemMenuBar]) -> CGFloat {
