@@ -76,6 +76,11 @@ final class DesktopScrimWindow: NSPanel {
 
 // MARK: - Menu bar view
 
+struct WindowShadow: Equatable {
+    var rect: CGRect      // window frame in the bar view's (flipped) coordinates
+    var active: Bool      // key window: larger, darker shadow
+}
+
 final class BarView: NSView {
     var wallpaper: CGImage? {
         didSet {
@@ -95,6 +100,8 @@ final class BarView: NSView {
     /// Offset from global menu-title coordinates to this view's coordinates.
     var origin: CGPoint = .zero { didSet { if origin != oldValue { needsDisplay = true } } }
     var dimmed = false { didSet { if dimmed != oldValue { needsDisplay = true } } }
+    /// Windows whose top edge is just below the bar: their shadows reach up under the menu bar.
+    var shadows: [WindowShadow] = [] { didSet { if shadows != oldValue { needsDisplay = true } } }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
@@ -172,6 +179,21 @@ final class BarView: NSView {
 
         let dark = isDark
         Scrim.draw(top: scrimTop, dark: dark, barHeight: bounds.height, offset: 0)
+
+        // Window shadows. On the desktop they fall on the wallpaper right below the bar; without this
+        // they'd stop dead at the bar's edge and leave a line. Shape measured on macOS 15: the key
+        // window's shadow reaches ~20 pt above its top edge, other windows' ~12 pt and lighter.
+        for s in shadows {
+            NSGraphicsContext.saveGraphicsState()
+            let sh = NSShadow()
+            sh.shadowBlurRadius = s.active ? 24 : 14
+            sh.shadowOffset = .zero
+            sh.shadowColor = NSColor.black.withAlphaComponent(s.active ? 0.15 : 0.11)
+            sh.set()
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: s.rect, xRadius: 10, yRadius: 10).fill()   // the fill itself is below the bar
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         // 2. Menu titles — metrics measured from the native macOS 15 menu bar (37 pt notch bar):
         //    13 pt text, baseline = midline + capHeight/2 (cap height centred);

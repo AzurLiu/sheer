@@ -43,7 +43,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let ws = NSWorkspace.shared
         observations.append(ws.observe(\.menuBarOwningApplication, options: [.initial, .new]) { [weak self] ws, _ in
-            DispatchQueue.main.async { self?.reader.attach(to: ws.menuBarOwningApplication) }
+            DispatchQueue.main.async {
+                self?.reader.attach(to: ws.menuBarOwningApplication)
+                // The key window (bigger shadow) changes; new windows often open now too.
+                for d in [0.05, 0.4] { DispatchQueue.main.asyncAfter(deadline: .now() + d) { self?.updateShadows() } }
+            }
         })
         if let button = statusItem.button {
             // The menu bar's appearance (light/dark text) follows the wallpaper; status items report it.
@@ -394,7 +398,58 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Polling: follow the system menu bar (full screen, auto-hide)
 
-    private func poll() { updateVisibility(SystemMenuBars.refresh(menuBarIDs)) }
+    private func poll() {
+        updateVisibility(SystemMenuBars.refresh(menuBarIDs))
+        // Follow windows closely only while the mouse is held (dragging, resizing); otherwise the 1 Hz
+        // slow poll and app switches are enough, which keeps the idle cost down.
+        let held = NSEvent.pressedMouseButtons & 1 != 0
+        if held && dragTimer == nil {
+            dragTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.updateShadows()
+                if NSEvent.pressedMouseButtons & 1 == 0 { self.dragTimer?.invalidate(); self.dragTimer = nil }
+            }
+            RunLoop.main.add(dragTimer!, forMode: .common)
+        }
+    }
+
+    // MARK: Window shadows under the bar
+
+    private var dragTimer: Timer?
+
+    /// Find windows whose top edge sits just below a menu bar, for their shadows.
+    func updateShadows() {
+        let shown = overlays.filter { $0.value.isVisible && $0.value.isOnActiveSpace }
+        guard !shown.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as NSArray?
+        else { clearShadows(); return }
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        var sawFront = false
+        var windows: [(CGRect, Bool)] = []
+        for case let info as NSDictionary in list {   // front to back; NSDictionary avoids bridging every key
+            guard (info[kCGWindowLayer] as? Int) == 0,
+                  ((info[kCGWindowAlpha] as? Double) ?? 1) > 0.05,
+                  let b = info[kCGWindowBounds] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: b), r.width > 40, r.height > 40 else { continue }
+            let pid = (info[kCGWindowOwnerPID] as? Int).map { pid_t($0) }
+            windows.append((r, pid == front && !sawFront))
+            if pid == front { sawFront = true }
+        }
+        for (id, w) in overlays {
+            guard shown[id] != nil else { w.bar.shadows = []; continue }
+            let db = CGDisplayBounds(id)
+            let barBottom = db.minY + w.frame.height
+            w.bar.shadows = windows.compactMap { r, active in
+                guard r.minY >= barBottom - 1, r.minY < barBottom + 30, r.maxX > db.minX, r.minX < db.maxX else { return nil }
+                return WindowShadow(rect: r.offsetBy(dx: -db.minX, dy: -db.minY), active: active)
+            }
+        }
+    }
+
+    private func clearShadows() {
+        for w in overlays.values { w.bar.shadows = [] }
+        dragTimer?.invalidate(); dragTimer = nil
+    }
 
     private func slowPoll() {
         let nowTrusted = AXIsProcessTrusted()
@@ -409,6 +464,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if tick % 600 == 0 { retrySupport() }
         if tick % 5 == 0 { placeInSpaces() }
 
+        if dragTimer == nil { updateShadows() }
         let current = SystemMenuBars.refresh(menuBarIDs)
         if current.count != menuBarIDs.count || current.isEmpty { rebuildOverlays(); return }
         layoutOverlays(current)
