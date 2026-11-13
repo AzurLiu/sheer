@@ -368,6 +368,43 @@ final class OverlayWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    // MARK: Mission Control slide (in step with the system menu bar)
+
+    private(set) var sliding = false
+
+    func slideOut() {
+        guard isVisible, !sliding else { return }
+        sliding = true
+        scrim.orderOut(nil)
+        let f = frame
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 0.25
+            c.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            animator().setFrame(f.offsetBy(dx: 0, dy: f.height), display: true)
+        }, completionHandler: {
+            self.orderOut(nil)
+            self.setFrame(f, display: false)
+            self.sliding = false
+        })
+    }
+
+    func slideIn() {
+        guard !sliding else { return }
+        sliding = true
+        let f = frame
+        setFrame(f.offsetBy(dx: 0, dy: f.height), display: false)
+        show()
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 0.3
+            c.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            animator().setFrame(f, display: true)
+        }, completionHandler: {
+            self.setFrame(f, display: false)
+            self.sliding = false
+            self.syncScrim()
+        })
+    }
+
     func show() {
         orderFrontRegardless()
         SkyLight.setSubLevel(windowNumber, 1)
@@ -411,7 +448,7 @@ final class OverlayWindow: NSPanel {
         scrim.view.a0 = a0
         scrim.view.dark = bar.isDark
         scrim.view.barHeight = frame.height
-        if isVisible && a0 > 0.005 {
+        if isVisible && !sliding && a0 > 0.005 {
             if !scrim.isVisible {
                 scrim.orderFrontRegardless()
                 if onDesktopSpacesOnly, let display { placeInSpaces(display: display) }
@@ -422,6 +459,7 @@ final class OverlayWindow: NSPanel {
     }
 
     func layout(screenFrame: NSRect, barHeight: CGFloat) {
+        guard !sliding else { return }
         let f = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight, width: screenFrame.width, height: barHeight)
         if frame != f { setFrame(f, display: true) }
         let h = barHeight * (Scrim.spread - 1)

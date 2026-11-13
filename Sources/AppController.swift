@@ -72,6 +72,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(testLevel(_:)), name: NSNotification.Name("sheer.test-level"), object: nil)
         #endif
         watchWallpaperStore()
+        observeDock()
 
         if !SkyLight.isAvailable { markUnsupported() }
         updates.onChange = { [weak self] in self?.updateStatusIcon() }
@@ -401,27 +402,91 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func poll() {
         scanWindows()
         updateVisibility(SystemMenuBars.refresh(menuBarIDs))
-        // Follow closely only while the mouse is held (dragging, resizing) or Mission Control is up;
-        // otherwise 4 Hz is plenty and keeps the idle cost down.
-        let fast = NSEvent.pressedMouseButtons & 1 != 0 || missionControl
-        if fast && fastTimer == nil {
+        // Follow windows closely only while the mouse is held (dragging, resizing); otherwise 4 Hz is
+        // plenty and keeps the idle cost down.
+        if NSEvent.pressedMouseButtons & 1 != 0 && fastTimer == nil {
             fastTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
                 guard let self else { return }
-                let wasMC = self.missionControl
                 self.scanWindows()
-                if self.missionControl != wasMC { self.updateVisibility() }
-                if NSEvent.pressedMouseButtons & 1 == 0 && !self.missionControl { self.fastTimer?.invalidate(); self.fastTimer = nil }
+                if NSEvent.pressedMouseButtons & 1 == 0 { self.fastTimer?.invalidate(); self.fastTimer = nil }
             }
             RunLoop.main.add(fastTimer!, forMode: .common)
         }
     }
 
-    // MARK: Window scan: shadows under the bar, Mission Control
+    // MARK: Mission Control
+    //
+    // Mission Control slides the menu bar up out of the way for its Spaces strip, and back down on exit.
+    // The overlay does the same, in step, so the system bar never shows. Entry: the Dock's
+    // AXExposeShowAllWindows notification (or, as a fallback, its full-screen layer-18 window in the
+    // window scan). Exit: the Dock's "Mission Control" AX group disappears as the exit animation starts
+    // (its window lingers until the end), so it's watched at 20 Hz while Mission Control is up.
+
+    private(set) var missionControl = false
+    private var mcTimer: Timer?
+    private var dockObserver: AXObserver?
+    private var observedDock: pid_t?
+    private var dockPIDCache: pid_t?
+    private var slideInNext = false
+    private var dockPID: pid_t? { dockPIDCache }
+
+    /// (Re)attach to the Dock; called at launch and every 30 s in case the Dock restarted.
+    private func observeDock() {
+        dockPIDCache = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
+        guard let pid = dockPID, pid != observedDock else { return }
+        if let old = dockObserver { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(old), .defaultMode) }
+        dockObserver = nil; observedDock = pid
+        var obs: AXObserver?
+        guard AXObserverCreate(pid, { _, _, _, ctx in
+            guard let ctx else { return }
+            let me = Unmanaged<AppController>.fromOpaque(ctx).takeUnretainedValue()
+            DispatchQueue.main.async { me.enterMissionControl() }
+        }, &obs) == .success, let obs else { return }
+        let dock = AXUIElementCreateApplication(pid)
+        for n in ["AXExposeShowAllWindows", "AXExposeShowFrontWindows"] {
+            AXObserverAddNotification(obs, dock, n as CFString, Unmanaged.passUnretained(self).toOpaque())
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+        dockObserver = obs
+    }
+
+    /// The Dock's AX tree has a group (besides the Dock list) only while Mission Control is shown.
+    private func dockShowsMissionControl() -> Bool {
+        guard let pid = dockPID else { return false }
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXChildrenAttribute as CFString, &v) == .success,
+              let kids = v as? [AXUIElement] else { return false }
+        return kids.contains { k in
+            var r: CFTypeRef?
+            AXUIElementCopyAttributeValue(k, kAXRoleAttribute as CFString, &r)
+            return (r as? String) == kAXGroupRole
+        }
+    }
+
+    private func enterMissionControl() {
+        guard !missionControl, dockShowsMissionControl() else { return }
+        missionControl = true
+        updateVisibility()
+        mcTimer?.invalidate()
+        mcTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+            guard let self, !self.dockShowsMissionControl() else { return }
+            self.exitMissionControl()
+        }
+        RunLoop.main.add(mcTimer!, forMode: .common)
+    }
+
+    private func exitMissionControl() {
+        mcTimer?.invalidate(); mcTimer = nil
+        guard missionControl else { return }
+        missionControl = false
+        slideInNext = true
+        updateVisibility()
+        slideInNext = false
+    }
+
+    // MARK: Window scan
 
     private var fastTimer: Timer?
-    /// Mission Control hides the menu bar for its Spaces strip; the overlay must go too.
-    private(set) var missionControl = false
-    private lazy var dockPID: pid_t? = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
 
     /// One pass over the on-screen windows: Mission Control (the Dock shows a full-screen layer-18
     /// window only then) and windows whose top edge sits just below a menu bar, for their shadows.
@@ -432,10 +497,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else { clearShadows(); return }
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         var sawFront = false, mc = false
+        let dock = dockPID
         var windows: [(CGRect, Bool)] = []
         for case let info as NSDictionary in list {   // front to back; NSDictionary avoids bridging every key
             let layer = info[kCGWindowLayer] as? Int
-            if layer == 18, let dockPID, (info[kCGWindowOwnerPID] as? Int).map({ pid_t($0) }) == dockPID { mc = true }
+            if layer == 18, let dock, (info[kCGWindowOwnerPID] as? Int).map({ pid_t($0) }) == dock { mc = true }
             guard layer == 0,
                   ((info[kCGWindowAlpha] as? Double) ?? 1) > 0.05,
                   let b = info[kCGWindowBounds] as? NSDictionary,
@@ -444,7 +510,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             windows.append((r, pid == front && !sawFront))
             if pid == front { sawFront = true }
         }
-        missionControl = mc
+        if mc && !missionControl { enterMissionControl() }   // fallback if the notification was missed
         for (id, w) in overlays {
             guard shown[id] != nil else { w.bar.shadows = []; continue }
             let db = CGDisplayBounds(id)
@@ -458,7 +524,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func clearShadows() {
         for w in overlays.values { w.bar.shadows = [] }
-        missionControl = false
     }
 
     private func slowPoll() {
@@ -472,6 +537,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let period = wallpapers.needsCapture ? 300 : 900   // live/dynamic wallpapers change over time
         if tick % period == 0 { wallpapers.invalidate(); reloadWallpapers() }
         if tick % 600 == 0 { retrySupport() }
+        if tick % 30 == 0 { observeDock() }
         if tick % 5 == 0 { placeInSpaces() }
 
         let current = SystemMenuBars.refresh(menuBarIDs)
@@ -511,7 +577,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Mid-switch the system menu bars slide sideways, so none sits on this display: keep the
             // overlay as it is rather than popping it out and back in.
             if missionControl {
-                if w.isVisible { w.orderOut(nil) }
+                if w.isVisible { w.slideOut() }
                 continue
             }
             let bar = menuBar(for: id, in: bars)
@@ -527,7 +593,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 Debug.append("\(Date().timeIntervalSince1970) show=\(show) visible=\(w.isVisible) active=\(w.isOnActiveSpace) fs=\(fullScreen) drawable=\(drawable) bar=\(mb.map { "\($0.windowID) on=\($0.onScreen) y=\($0.bounds.minY)" } ?? "nil") all=\(bars.map { "\($0.windowID):\($0.onScreen):\($0.bounds.minY)" })\n", "vis.txt")
             }
             #endif
-            if show && !w.isVisible { w.show() }
+            if show && !w.isVisible { slideInNext ? w.slideIn() : w.show() }
             else if !show && w.isVisible { w.orderOut(nil) }
             w.syncScrim()
         }
