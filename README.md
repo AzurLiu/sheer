@@ -9,6 +9,7 @@
 
 Sheer removes the frosted background of the macOS 15 menu bar so your wallpaper shows straight through — the way the menu bar looks on macOS 26 and 27. A faint gradient at the top of the wallpaper keeps the menu titles readable, just like the newer systems do.
 
+- **English, 简体中文, 繁體中文.** The menu follows your system language.
 - **Native-looking.** Menu titles, the Apple logo and the selection highlight are drawn at the exact size and position of the real menu bar (measured pixel-by-pixel against macOS 15). Clicks go straight to the real menu bar, so everything works as usual.
 - **Follows your wallpaper.** Changes are picked up automatically, with a soft crossfade. Still images, dynamic wallpapers and Apple's video wallpapers are read from their files — no screen recording.
 - **Stays out of the way.** No settings to tweak. Full-screen apps, auto-hiding menu bars and status items are left untouched. Typical usage is ~0.2% CPU and ~30 MB of memory.
