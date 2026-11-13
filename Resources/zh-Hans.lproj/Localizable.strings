@@ -1,0 +1,18 @@
+"setup.message" = "Sheer 需要「辅助功能」权限来读取菜单文字，只需授权一次。\n点下面的按钮，在列表里打开 Sheer 的开关，完成后本窗口会自动关闭。";
+"setup.button" = "打开辅助功能设置";
+
+"menu.unsupported" = "已暂停：不支持当前的 macOS 版本";
+"menu.grant-accessibility" = "授予辅助功能权限…";
+"menu.grant-screen-recording" = "允许屏幕录制（当前壁纸需要）…";
+"menu.launch-at-login" = "登录时自动启动";
+"menu.about" = "关于 Sheer";
+"menu.quit" = "退出 Sheer";
+
+"about.credits" = "在 macOS 15 上实现 macOS 26/27 风格的透明菜单栏。\n基于 MIT 许可证开源。";
+
+"alert.newer-macos.title" = "这台 Mac 不需要 Sheer";
+"alert.newer-macos.body" = "macOS 26 及以后的系统已自带透明菜单栏，Sheer 将退出。";
+"alert.unsupported.title" = "Sheer 已暂停";
+"alert.unsupported.body" = "在当前 macOS 版本上，Sheer 无法把图层放到菜单栏之上，因此会照常显示系统菜单栏。请检查 Sheer 是否有更新。";
+"alert.login-item.title" = "无法设置登录项";
+"alert.login-item.body" = "请先把 Sheer.app 放进「应用程序」文件夹再试。";

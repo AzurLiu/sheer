@@ -1,0 +1,45 @@
+#!/bin/zsh
+# Build Sheer.app (needs only the Xcode Command Line Tools: `xcode-select --install`).
+#
+#   ./build.sh          release build → build/Sheer.app and dist/Sheer.zip
+#   ./build.sh --dev    development build: includes the self-check tooling and signs with a stable
+#                       requirement so macOS keeps your permissions across rebuilds (local use only)
+set -euo pipefail
+cd "$(dirname "$0")"
+
+DEV=0
+[[ "${1:-}" == "--dev" ]] && DEV=1
+
+APP=build/Sheer.app
+TMP=build/tmp
+rm -rf "$APP" "$TMP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$TMP" dist
+
+cp Info.plist "$APP/Contents/Info.plist"
+cp -R Resources/*.lproj "$APP/Contents/Resources/"
+
+# App icon: drawn in code → .iconset → .icns
+swiftc -O Icon/make_icon.swift -o "$TMP/make_icon"
+"$TMP/make_icon" "$TMP/AppIcon.iconset"
+iconutil -c icns "$TMP/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
+
+FLAGS=(-O -swift-version 5)
+(( DEV )) && FLAGS+=(-D SHEER_DEBUG)
+for arch in arm64 x86_64; do
+  swiftc "${FLAGS[@]}" -target "$arch-apple-macos14.0" Sources/*.swift -o "$TMP/Sheer-$arch"
+done
+lipo -create "$TMP/Sheer-arm64" "$TMP/Sheer-x86_64" -output "$APP/Contents/MacOS/Sheer"
+rm -rf "$TMP"
+
+if (( DEV )); then
+  # Stable designated requirement: permissions survive rebuilds. Don't ship this — any app claiming
+  # the same identifier would satisfy it.
+  codesign --force --sign - -r='designated => identifier "io.github.sheer.Sheer"' "$APP"
+else
+  # Ad-hoc signature with the default (hash-based) requirement.
+  codesign --force --sign - "$APP"
+  rm -f dist/Sheer.zip
+  ditto -c -k --keepParent "$APP" dist/Sheer.zip
+fi
+codesign --verify --strict "$APP"
+echo "✅ built $APP$( (( DEV )) && echo ' (dev)' || echo ' and dist/Sheer.zip')"
