@@ -332,10 +332,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (id, w) in overlays where w.isVisible {
             guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(w.windowNumber)) as? [[String: Any]]
             else { continue }
-            let covered = above.contains { d in bars.contains { $0.windowID == d[kCGWindowNumber as String] as? CGWindowID } }
+            // Only this display's on-screen menu bar counts; Space switches can briefly reorder windows.
+            guard let bar = menuBar(for: id, in: bars), bar.onScreen, !SkyLight.isFullScreenSpace(id) else {
+                orderingFailures[id] = 0; continue
+            }
+            let covered = above.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == bar.windowID }
             if covered {
                 orderingFailures[id, default: 0] += 1
-                if orderingFailures[id, default: 0] >= 3 { markUnsupported(); return }
+                if orderingFailures[id, default: 0] >= 10 { markUnsupported(); return }
                 w.show()
             } else {
                 orderingFailures[id] = 0
@@ -348,7 +352,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let drawable = reader.isDrawable
         for (id, w) in overlays {
             let db = CGDisplayBounds(id)
-            let barAtTop = menuBar(for: id, in: bars).map { $0.onScreen && abs($0.bounds.minY - db.minY) < 0.5 } ?? false
+            let barAtTop = !SkyLight.isFullScreenSpace(id)
+                && (menuBar(for: id, in: bars).map { $0.onScreen && abs($0.bounds.minY - db.minY) < 0.5 } ?? false)
             let show = !unsupported && AXIsProcessTrusted() && drawable && barAtTop && w.bar.wallpaper != nil
             if show && !w.isVisible { w.show() }
             else if !show && w.isVisible { w.orderOut(nil) }

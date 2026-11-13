@@ -6,6 +6,7 @@
 // the wallpaper strip plus the menu titles at their exact positions.
 
 import AppKit
+import ColorSync
 
 // MARK: - Legibility gradient (like macOS 26/27: a faint gradient at the top of the wallpaper)
 
@@ -237,6 +238,24 @@ enum SkyLight {
     static func setSubLevel(_ windowNumber: Int, _ sub: Int32) -> Bool {
         guard windowNumber > 0, let conn, let setSub else { return false }
         return setSub(conn(), UInt32(windowNumber), sub) == 0
+    }
+
+    private typealias CurrentSpace = @convention(c) (Int32, CFString) -> UInt64
+    private typealias SpaceType = @convention(c) (Int32, UInt64) -> Int32
+    private static let currentSpace: CurrentSpace? = dlsym(handle, "SLSManagedDisplayGetCurrentSpace").map { unsafeBitCast($0, to: CurrentSpace.self) }
+    private static let spaceType: SpaceType? = dlsym(handle, "SLSSpaceGetType").map { unsafeBitCast($0, to: SpaceType.self) }
+    private static var uuids: [CGDirectDisplayID: CFString] = [:]
+
+    /// True when the display is showing a full-screen app's Space (type 4). Read-only query.
+    static func isFullScreenSpace(_ display: CGDirectDisplayID) -> Bool {
+        guard let conn, let currentSpace, let spaceType else { return false }
+        if uuids[display] == nil, let u = CGDisplayCreateUUIDFromDisplayID(display)?.takeRetainedValue() {
+            uuids[display] = CFUUIDCreateString(nil, u)
+        }
+        guard let uuid = uuids[display] else { return false }
+        let c = conn()
+        let sid = currentSpace(c, uuid)
+        return sid != 0 && spaceType(c, sid) == 4
     }
 }
 
