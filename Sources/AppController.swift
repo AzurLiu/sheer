@@ -46,7 +46,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self?.reader.attach(to: ws.menuBarOwningApplication)
                 // The key window (bigger shadow) changes; new windows often open now too.
-                for d in [0.05, 0.4] { DispatchQueue.main.asyncAfter(deadline: .now() + d) { self?.updateShadows() } }
+                for d in [0.05, 0.4] { DispatchQueue.main.asyncAfter(deadline: .now() + d) { self?.scanWindows() } }
             }
         })
         if let button = statusItem.button {
@@ -399,35 +399,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Polling: follow the system menu bar (full screen, auto-hide)
 
     private func poll() {
+        scanWindows()
         updateVisibility(SystemMenuBars.refresh(menuBarIDs))
-        // Follow windows closely only while the mouse is held (dragging, resizing); otherwise the 1 Hz
-        // slow poll and app switches are enough, which keeps the idle cost down.
-        let held = NSEvent.pressedMouseButtons & 1 != 0
-        if held && dragTimer == nil {
-            dragTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+        // Follow closely only while the mouse is held (dragging, resizing) or Mission Control is up;
+        // otherwise 4 Hz is plenty and keeps the idle cost down.
+        let fast = NSEvent.pressedMouseButtons & 1 != 0 || missionControl
+        if fast && fastTimer == nil {
+            fastTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
                 guard let self else { return }
-                self.updateShadows()
-                if NSEvent.pressedMouseButtons & 1 == 0 { self.dragTimer?.invalidate(); self.dragTimer = nil }
+                let wasMC = self.missionControl
+                self.scanWindows()
+                if self.missionControl != wasMC { self.updateVisibility() }
+                if NSEvent.pressedMouseButtons & 1 == 0 && !self.missionControl { self.fastTimer?.invalidate(); self.fastTimer = nil }
             }
-            RunLoop.main.add(dragTimer!, forMode: .common)
+            RunLoop.main.add(fastTimer!, forMode: .common)
         }
     }
 
-    // MARK: Window shadows under the bar
+    // MARK: Window scan: shadows under the bar, Mission Control
 
-    private var dragTimer: Timer?
+    private var fastTimer: Timer?
+    /// Mission Control hides the menu bar for its Spaces strip; the overlay must go too.
+    private(set) var missionControl = false
+    private lazy var dockPID: pid_t? = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
 
-    /// Find windows whose top edge sits just below a menu bar, for their shadows.
-    func updateShadows() {
+    /// One pass over the on-screen windows: Mission Control (the Dock shows a full-screen layer-18
+    /// window only then) and windows whose top edge sits just below a menu bar, for their shadows.
+    func scanWindows() {
         let shown = overlays.filter { $0.value.isVisible && $0.value.isOnActiveSpace }
-        guard !shown.isEmpty,
-              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as NSArray?
+        guard !overlays.isEmpty,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as NSArray?
         else { clearShadows(); return }
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        var sawFront = false
+        var sawFront = false, mc = false
         var windows: [(CGRect, Bool)] = []
         for case let info as NSDictionary in list {   // front to back; NSDictionary avoids bridging every key
-            guard (info[kCGWindowLayer] as? Int) == 0,
+            let layer = info[kCGWindowLayer] as? Int
+            if layer == 18, let dockPID, (info[kCGWindowOwnerPID] as? Int).map({ pid_t($0) }) == dockPID { mc = true }
+            guard layer == 0,
                   ((info[kCGWindowAlpha] as? Double) ?? 1) > 0.05,
                   let b = info[kCGWindowBounds] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b), r.width > 40, r.height > 40 else { continue }
@@ -435,6 +444,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             windows.append((r, pid == front && !sawFront))
             if pid == front { sawFront = true }
         }
+        missionControl = mc
         for (id, w) in overlays {
             guard shown[id] != nil else { w.bar.shadows = []; continue }
             let db = CGDisplayBounds(id)
@@ -448,7 +458,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func clearShadows() {
         for w in overlays.values { w.bar.shadows = [] }
-        dragTimer?.invalidate(); dragTimer = nil
+        missionControl = false
     }
 
     private func slowPoll() {
@@ -464,7 +474,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if tick % 600 == 0 { retrySupport() }
         if tick % 5 == 0 { placeInSpaces() }
 
-        if dragTimer == nil { updateShadows() }
         let current = SystemMenuBars.refresh(menuBarIDs)
         if current.count != menuBarIDs.count || current.isEmpty { rebuildOverlays(); return }
         layoutOverlays(current)
@@ -501,6 +510,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // ordered in lets it slide in and out with the desktop instead of popping.
             // Mid-switch the system menu bars slide sideways, so none sits on this display: keep the
             // overlay as it is rather than popping it out and back in.
+            if missionControl {
+                if w.isVisible { w.orderOut(nil) }
+                continue
+            }
             let bar = menuBar(for: id, in: bars)
             if fullScreen != lastFullScreen[id] { lastFullScreen[id] = fullScreen; switchingUntil = Date() + 1.5 }
             let switching = bar == nil || (bar?.onScreen != true && Date() < switchingUntil)
