@@ -23,6 +23,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Sheer then stays out of the way and the system menu bar shows as usual.
     private(set) var unsupported = false
     private var orderingFailures: [CGDirectDisplayID: Int] = [:]
+    private var warnedUnsupported = false
+    let updates = UpdateChecker()
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // macOS 26+ already has a transparent menu bar (and changed how it's drawn).
@@ -57,10 +59,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(wakeUp), name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
         #if SHEER_DEBUG
         dnc.addObserver(self, selector: #selector(selfCheck), name: NSNotification.Name("sheer.selfcheck"), object: nil)
+        dnc.addObserver(self, selector: #selector(testUnsupported), name: NSNotification.Name("sheer.test-unsupported"), object: nil)
+        dnc.addObserver(self, selector: #selector(spaceChanged), name: NSNotification.Name("sheer.test-space"), object: nil)
         #endif
         watchWallpaperStore()
 
         if !SkyLight.isAvailable { markUnsupported() }
+        updates.onChange = { [weak self] in self?.updateStatusIcon() }
+        updates.start()
         if !AXIsProcessTrusted() { showSetup() }
 
         rebuildOverlays()
@@ -104,7 +110,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !unsupported else { return }
         unsupported = true
         for w in overlays.values { w.orderOut(nil) }
-        alert(L("alert.unsupported.title"), L("alert.unsupported.body"))
+        if !warnedUnsupported {   // once per launch; Sheer keeps retrying quietly (see retrySupport)
+            warnedUnsupported = true
+            alert(L("alert.unsupported.title"), L("alert.unsupported.body"))
+        }
+    }
+
+    #if SHEER_DEBUG
+    @objc private func testUnsupported() { warnedUnsupported = true; markUnsupported() }
+    /// Menu titles as they'd appear right now (for the self-check).
+    func menuTitlesForTesting() -> [String] {
+        let m = NSMenu(); menuNeedsUpdate(m); return m.items.map { $0.isSeparatorItem ? "---" : $0.title }
+    }
+    #endif
+
+    /// Give the overlay another chance after something that reshuffles windows (Space switch, wake,
+    /// display change) and every 10 minutes, so a one-off glitch doesn't switch Sheer off for good.
+    private func retrySupport() {
+        guard unsupported, SkyLight.isAvailable else { return }
+        unsupported = false
+        orderingFailures = [:]
+        updateVisibility()
     }
 
     // MARK: Status menu
@@ -132,6 +158,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: "Sheer", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if let v = updates.available {
+            add(String(format: L("menu.update-available"), v), #selector(openReleases))
+        }
         if unsupported {
             let note = NSMenuItem(title: L("menu.unsupported"), action: nil, keyEquivalent: "")
             note.isEnabled = false
@@ -149,6 +178,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSetup() { showSetup() }
+
+    @objc private func openReleases() { NSWorkspace.shared.open(UpdateChecker.releasesPage) }
+
+    /// A small dot on the status icon while an update is available.
+    private func updateStatusIcon() {
+        guard let button = statusItem.button else { return }
+        guard let base = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: "Sheer") else { return }
+        var img = base
+        if updates.available != nil {
+            let size = NSSize(width: base.size.width + 3, height: base.size.height)
+            img = NSImage(size: size, flipped: false) { _ in
+                base.draw(in: NSRect(x: 0, y: 0, width: base.size.width, height: base.size.height))
+                NSBezierPath(ovalIn: NSRect(x: size.width - 6, y: size.height - 6, width: 6, height: 6)).fill()
+                return true
+            }
+        }
+        img.isTemplate = true
+        button.image = img
+    }
 
     @objc private func openScreenRecording() {
         CGRequestScreenCaptureAccess()
@@ -175,12 +223,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Events
 
-    @objc private func screensChanged() { rebuildOverlays() }
+    @objc private func screensChanged() { retrySupport(); rebuildOverlays() }
     @objc private func wakeUp() {
+        retrySupport()
         rebuildOverlays()
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.reloadWallpapers() }
     }
     @objc private func spaceChanged() {
+        retrySupport()
         reloadWallpapers(); reader.scheduleRefresh()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.reloadWallpapers() }
     }
@@ -319,6 +369,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick += 1
         let period = wallpapers.needsCapture ? 300 : 900   // live/dynamic wallpapers change over time
         if tick % period == 0 { wallpapers.invalidate(); reloadWallpapers() }
+        if tick % 600 == 0 { retrySupport() }
 
         let current = SystemMenuBars.refresh(menuBarIDs)
         if current.count != menuBarIDs.count || current.isEmpty { rebuildOverlays(); return }

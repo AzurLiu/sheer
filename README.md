@@ -50,7 +50,7 @@ An app you build yourself isn't quarantined, so Gatekeeper won't block it.
 | **Accessibility** | Read the current app's menu titles and their positions so they can be redrawn. | Always (required) |
 | **Screen Recording** | Take a single snapshot of the wallpaper when it has no file to read: live wallpapers (e.g. *Macintosh*, Aerials), shuffling wallpapers, or different wallpapers per display or Space. | Only for those wallpapers |
 
-Sheer has no network access, collects nothing and stores nothing except its launch-at-login setting.
+Sheer collects nothing. Its only network request is a once-a-day check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed automatically.
 
 > macOS 15 periodically asks whether apps may keep recording the screen. You'll only see this with the wallpapers listed above.
 
@@ -111,7 +111,7 @@ Sheer 让 **macOS 15 Sequoia** 的菜单栏变成 macOS 26/27 那样的透明效
 - **辅助功能（必需）**：读取当前应用的菜单文字和位置。
 - **屏幕录制（仅特殊壁纸）**：只有 Macintosh、航拍等实时渲染壁纸、随机轮换壁纸、或每个屏幕 / 空间用不同壁纸时，才需要截取一次壁纸画面。
 
-Sheer 不联网、不收集任何数据。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
+Sheer 不收集任何数据。唯一的联网是每天一次向 GitHub 查询最新版本号；有新版本时，Sheer 菜单里会出现「有新版本」，不会自动下载或安装。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
 
 ### 已知限制
 

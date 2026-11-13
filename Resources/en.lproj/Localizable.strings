@@ -1,7 +1,8 @@
 "setup.message" = "Sheer needs Accessibility access to read the menu titles. You only need to grant it once.\nClick the button below and turn on Sheer in the list. This window closes by itself when you're done.";
 "setup.button" = "Open Accessibility Settings";
 
-"menu.unsupported" = "Paused: not supported on this macOS version";
+"menu.unsupported" = "Paused: can't draw above the menu bar right now (retrying automatically)";
+"menu.update-available" = "Update Available: %@…";
 "menu.grant-accessibility" = "Grant Accessibility Access…";
 "menu.grant-screen-recording" = "Allow Screen Recording (needed for this wallpaper)…";
 "menu.launch-at-login" = "Launch at Login";
@@ -13,6 +14,6 @@
 "alert.newer-macos.title" = "Sheer isn't needed on this Mac";
 "alert.newer-macos.body" = "macOS 26 and later already have a transparent menu bar. Sheer will quit.";
 "alert.unsupported.title" = "Sheer is paused";
-"alert.unsupported.body" = "Sheer can't place its layer above the menu bar on this version of macOS, so the system menu bar is shown as usual. Please check for a Sheer update.";
+"alert.unsupported.body" = "Sheer couldn't keep its layer above the menu bar, so the system menu bar is shown as usual. Sheer will try again automatically. If this keeps happening, please check for a Sheer update.";
 "alert.login-item.title" = "Couldn't change the login item";
 "alert.login-item.body" = "Move Sheer.app to the Applications folder and try again.";

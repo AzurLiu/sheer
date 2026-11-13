@@ -1,7 +1,8 @@
 "setup.message" = "Sheer 需要「輔助使用」權限來讀取選單文字，只需授權一次。\n點下方的按鈕，在列表中打開 Sheer 的開關，完成後此視窗會自動關閉。";
 "setup.button" = "打開輔助使用設定";
 
-"menu.unsupported" = "已暫停：不支援目前的 macOS 版本";
+"menu.unsupported" = "已暫停：暫時無法顯示在選單列之上（會自動重試）";
+"menu.update-available" = "有新版本：%@…";
 "menu.grant-accessibility" = "授予輔助使用權限…";
 "menu.grant-screen-recording" = "允許螢幕錄製（目前的桌面背景需要）…";
 "menu.launch-at-login" = "登入時自動啟動";
@@ -13,6 +14,6 @@
 "alert.newer-macos.title" = "這台 Mac 不需要 Sheer";
 "alert.newer-macos.body" = "macOS 26 及以後的系統已內建透明選單列，Sheer 將會結束。";
 "alert.unsupported.title" = "Sheer 已暫停";
-"alert.unsupported.body" = "在目前的 macOS 版本上，Sheer 無法把圖層放到選單列之上，因此會照常顯示系統選單列。請檢查 Sheer 是否有更新。";
+"alert.unsupported.body" = "Sheer 暫時無法把圖層保持在選單列之上，所以先顯示系統選單列。Sheer 會自動重試；如果反覆出現，請檢查 Sheer 是否有更新。";
 "alert.login-item.title" = "無法設定登入項目";
 "alert.login-item.body" = "請先把 Sheer.app 放進「應用程式」檔案夾再試。";

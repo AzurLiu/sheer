@@ -19,6 +19,8 @@ extension AppController {
             let menubarAbove = above.contains { ($0[kCGWindowName as String] as? String) == "Menubar" }
             report += "overlay \(w.windowNumber): visible=\(w.isVisible) menubarAbove=\(menubarAbove) scrimTop=\(w.bar.scrimTop)\n"
         }
+        report += "update: \(updates.available ?? "none")  icon: \(statusItem.button?.image?.size ?? .zero)\n"
+        report += "menu: \(menuTitlesForTesting())\n"
         Debug.write(report, "selfcheck.txt")
 
         guard CGPreflightScreenCaptureAccess(), let screen = NSScreen.screens.first else { return }
