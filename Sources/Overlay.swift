@@ -181,18 +181,23 @@ final class BarView: NSView {
         Scrim.draw(top: scrimTop, dark: dark, barHeight: bounds.height, offset: 0)
 
         // Window shadows. On the desktop they fall on the wallpaper right below the bar; without this
-        // they'd stop dead at the bar's edge and leave a line. Shape measured on macOS 15: the key
-        // window's shadow reaches ~20 pt above its top edge, other windows' ~12 pt and lighter.
+        // they'd stop dead at the bar's edge and leave a line. Fitted to macOS 15 (measured against white,
+        // alpha of black above the top edge): a soft shadow, ~0.067 at 1.5 pt fading to 0 by ~25 pt
+        // (≈ blur 28, 0.14; background windows a touch lighter), plus a tight contact line (~0.16 within 0.5 pt, ~0.03 at 1 pt).
         for s in shadows {
-            NSGraphicsContext.saveGraphicsState()
-            let sh = NSShadow()
-            sh.shadowBlurRadius = s.active ? 24 : 14
-            sh.shadowOffset = .zero
-            sh.shadowColor = NSColor.black.withAlphaComponent(s.active ? 0.15 : 0.11)
-            sh.set()
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: s.rect, xRadius: 10, yRadius: 10).fill()   // the fill itself is below the bar
-            NSGraphicsContext.restoreGraphicsState()
+            for (blur, alpha) in [(28.0, s.active ? 0.14 : 0.13), (1.0, 0.5)] as [(CGFloat, CGFloat)] {
+                NSGraphicsContext.saveGraphicsState()
+                // Only the shadow above the window's top edge; never the shape itself.
+                NSBezierPath(rect: NSRect(x: 0, y: 0, width: bounds.width, height: max(0, s.rect.minY))).addClip()
+                let sh = NSShadow()
+                sh.shadowBlurRadius = blur
+                sh.shadowOffset = .zero
+                sh.shadowColor = NSColor.black.withAlphaComponent(alpha)
+                sh.set()
+                NSColor.black.setFill()
+                NSBezierPath(roundedRect: s.rect, xRadius: 10, yRadius: 10).fill()   // the fill itself is clipped away
+                NSGraphicsContext.restoreGraphicsState()
+            }
         }
 
         // 2. Menu titles — metrics measured from the native macOS 15 menu bar (37 pt notch bar):
@@ -320,6 +325,21 @@ enum SkyLight {
             return (s["id64"] as? NSNumber)?.uint64Value ?? (s["ManagedSpaceID"] as? NSNumber)?.uint64Value
         }
         return ids.isEmpty ? nil : ids
+    }
+
+    /// Whether a window (any app's; read-only query) is on the Space the display is showing.
+    static func isOnCurrentSpace(_ windowID: CGWindowID, display: CGDirectDisplayID) -> Bool {
+        guard let conn, let currentSpace, let copyForWindows else { return true }
+        if uuids[display] == nil, let u = CGDisplayCreateUUIDFromDisplayID(display)?.takeRetainedValue() {
+            uuids[display] = CFUUIDCreateString(nil, u)
+        }
+        guard let uuid = uuids[display] else { return true }
+        let c = conn()
+        let current = currentSpace(c, uuid)
+        guard current != 0,
+              let spaces = copyForWindows(c, 0x7, [NSNumber(value: windowID)] as CFArray)?.takeRetainedValue() as? [NSNumber]
+        else { return true }
+        return spaces.contains { $0.uint64Value == current }
     }
 
     /// Put the windows on exactly the display's desktop Spaces. Returns false if that didn't take.
@@ -461,7 +481,12 @@ final class OverlayWindow: NSPanel {
     func layout(screenFrame: NSRect, barHeight: CGFloat) {
         guard !sliding else { return }
         let f = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight, width: screenFrame.width, height: barHeight)
-        if frame != f { setFrame(f, display: true) }
+        if frame != f {
+            #if SHEER_DEBUG
+            Debug.append(String(format: "%.3f layout %@ -> %@\n", Date().timeIntervalSince1970, NSStringFromRect(frame), NSStringFromRect(f)), "layout.txt")
+            #endif
+            setFrame(f, display: true)
+        }
         let h = barHeight * (Scrim.spread - 1)
         let s = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight - h, width: screenFrame.width, height: h)
         if scrim.frame != s { scrim.setFrame(s, display: true) }

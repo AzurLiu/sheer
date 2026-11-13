@@ -337,6 +337,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func layoutOverlays(_ bars: [SystemMenuBar]) {
         for (id, w) in overlays {
             guard let screen = screen(for: id) else { continue }
+            // A full-screen Space has its own menu bar window (38 pt, not 37); mid-switch none sits at
+            // the top. Keep the desktop's layout then rather than resizing back and forth.
+            if w.frame.height > 0, SkyLight.isFullScreenSpace(id) || Date() < switchingUntil
+                || menuBar(for: id, in: bars).map({ !$0.onScreen || $0.bounds.minY != CGDisplayBounds(id).minY }) ?? true { continue }
             w.layout(screenFrame: screen.frame, barHeight: barHeight(for: screen, bars: bars))
         }
     }
@@ -498,7 +502,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         var sawFront = false, mc = false
         let dock = dockPID
-        var windows: [(CGRect, Bool)] = []
+        var windows: [(CGRect, Bool, CGWindowID)] = []
         for case let info as NSDictionary in list {   // front to back; NSDictionary avoids bridging every key
             let layer = info[kCGWindowLayer] as? Int
             if layer == 18, let dock, (info[kCGWindowOwnerPID] as? Int).map({ pid_t($0) }) == dock { mc = true }
@@ -507,16 +511,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                   let b = info[kCGWindowBounds] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b), r.width > 40, r.height > 40 else { continue }
             let pid = (info[kCGWindowOwnerPID] as? Int).map { pid_t($0) }
-            windows.append((r, pid == front && !sawFront))
+            windows.append((r, pid == front && !sawFront, (info[kCGWindowNumber] as? Int).map { CGWindowID($0) } ?? 0))
             if pid == front { sawFront = true }
         }
         if mc && !missionControl { enterMissionControl() }   // fallback if the notification was missed
+        // Mid-switch, windows of the Space sliding in (e.g. a full-screen app) count as on screen with
+        // their resting frames; keep the current shadows until the switch is over.
+        if Date() < switchingUntil { return }
         for (id, w) in overlays {
             guard shown[id] != nil else { w.bar.shadows = []; continue }
             let db = CGDisplayBounds(id)
             let barBottom = db.minY + w.frame.height
-            w.bar.shadows = windows.compactMap { r, active in
-                guard r.minY >= barBottom - 1, r.minY < barBottom + 30, r.maxX > db.minX, r.minX < db.maxX else { return nil }
+            w.bar.shadows = windows.compactMap { r, active, wid in
+                guard r.minY >= barBottom - 0.5, r.minY < barBottom + 30, r.maxX > db.minX, r.minX < db.maxX,
+                      SkyLight.isOnCurrentSpace(wid, display: id) else { return nil }
                 return WindowShadow(rect: r.offsetBy(dx: -db.minX, dy: -db.minY), active: active)
             }
         }
