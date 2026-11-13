@@ -100,7 +100,15 @@ final class BarView: NSView {
     override var isOpaque: Bool { true }
     override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
 
-    var isDark: Bool { effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
+    /// Light text on a dark gradient (true) or dark text on a light one. Like macOS 26, the text follows
+    /// the wallpaper: whichever colour reads with less gradient wins, so a bright wallpaper isn't muddied
+    /// by a dark gradient. On a near tie it follows the system menu bar.
+    var isDark: Bool {
+        let system = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        guard wallpaper != nil else { return system }
+        let light = scrimAlpha(darkText: false), dark = scrimAlpha(darkText: true)
+        return system ? !(dark + 0.05 < light) : light + 0.05 < dark
+    }
 
     // Luminance of the parts of the wallpaper least favourable to text (90th / 10th percentile, linear 0…1).
     private var lumBright: CGFloat = 0
