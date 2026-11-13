@@ -63,7 +63,7 @@ final class DesktopScrimWindow: NSPanel {
         hasShadow = false
         isOpaque = false
         backgroundColor = .clear
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        collectionBehavior = OverlayWindow.allSpaces
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         animationBehavior = .none
@@ -257,6 +257,60 @@ enum SkyLight {
         let sid = currentSpace(c, uuid)
         return sid != 0 && spaceType(c, sid) == 4
     }
+
+    // Space membership of Sheer's own windows. A window that joins all Spaces stays put while the
+    // Spaces slide during a switch, so it has to be hidden for full-screen apps and the system bar shows
+    // through mid-animation. Placing the windows on the display's desktop Spaces only (never full-screen
+    // ones) lets them slide away with the desktop like the real menu bar.
+    private typealias CopyArray = @convention(c) (Int32) -> Unmanaged<CFArray>?
+    private typealias CopyForWindows = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+    private typealias WindowsSpaces = @convention(c) (Int32, CFArray, CFArray) -> Void
+    private static let copySpaces: CopyArray? = dlsym(handle, "SLSCopyManagedDisplaySpaces").map { unsafeBitCast($0, to: CopyArray.self) }
+    private static let copyForWindows: CopyForWindows? = dlsym(handle, "SLSCopySpacesForWindows").map { unsafeBitCast($0, to: CopyForWindows.self) }
+    private static let addToSpaces: WindowsSpaces? = dlsym(handle, "SLSAddWindowsToSpaces").map { unsafeBitCast($0, to: WindowsSpaces.self) }
+    private static let removeFromSpaces: WindowsSpaces? = dlsym(handle, "SLSRemoveWindowsFromSpaces").map { unsafeBitCast($0, to: WindowsSpaces.self) }
+
+    static var canPlaceInSpaces: Bool {
+        conn != nil && copySpaces != nil && copyForWindows != nil && addToSpaces != nil && removeFromSpaces != nil
+    }
+
+    /// The desktop (non-full-screen) Spaces of a display.
+    private static func desktopSpaces(of display: CGDirectDisplayID) -> [UInt64]? {
+        guard let conn, let copySpaces,
+              let list = copySpaces(conn())?.takeRetainedValue() as? [[String: Any]], !list.isEmpty else { return nil }
+        if uuids[display] == nil, let u = CGDisplayCreateUUIDFromDisplayID(display)?.takeRetainedValue() {
+            uuids[display] = CFUUIDCreateString(nil, u)
+        }
+        let uuid = uuids[display] as String?
+        // With "Displays have separate Spaces" off there is one entry ("Main") for all displays.
+        guard let entry = list.first(where: { ($0["Display Identifier"] as? String) == uuid }) ?? (list.count == 1 ? list[0] : nil),
+              let spaces = entry["Spaces"] as? [[String: Any]] else { return nil }
+        let ids = spaces.compactMap { s -> UInt64? in
+            guard (s["type"] as? Int) == 0 else { return nil }
+            return (s["id64"] as? NSNumber)?.uint64Value ?? (s["ManagedSpaceID"] as? NSNumber)?.uint64Value
+        }
+        return ids.isEmpty ? nil : ids
+    }
+
+    /// Put the windows on exactly the display's desktop Spaces. Returns false if that didn't take.
+    @discardableResult
+    static func placeOnDesktopSpaces(_ windowNumbers: [Int], display: CGDirectDisplayID) -> Bool {
+        guard canPlaceInSpaces, let conn, let copyForWindows, let addToSpaces, let removeFromSpaces,
+              let wanted = desktopSpaces(of: display) else { return false }
+        let c = conn()
+        let want = Set(wanted)
+        for wid in windowNumbers where wid > 0 {
+            let w = [NSNumber(value: UInt32(wid))] as CFArray
+            let have = Set(((copyForWindows(c, 0x7, w)?.takeRetainedValue() as? [NSNumber]) ?? []).map(\.uint64Value))
+            if have == want { continue }
+            let add = want.subtracting(have), remove = have.subtracting(want)
+            if !add.isEmpty { addToSpaces(c, w, add.map { NSNumber(value: $0) } as CFArray) }
+            if !remove.isEmpty { removeFromSpaces(c, w, remove.map { NSNumber(value: $0) } as CFArray) }
+            let now = Set(((copyForWindows(c, 0x7, w)?.takeRetainedValue() as? [NSNumber]) ?? []).map(\.uint64Value))
+            if now != want { return false }
+        }
+        return true
+    }
 }
 
 final class OverlayWindow: NSPanel {
@@ -270,7 +324,7 @@ final class OverlayWindow: NSPanel {
         hasShadow = false
         isOpaque = true
         backgroundColor = .clear
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        collectionBehavior = OverlayWindow.allSpaces
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         animationBehavior = .none
@@ -289,6 +343,31 @@ final class OverlayWindow: NSPanel {
         SkyLight.setSubLevel(windowNumber, 1)
         orderFrontRegardless()
         syncScrim()
+        if let display { placeInSpaces(display: display) }
+    }
+
+    // MARK: Spaces
+
+    static let allSpaces: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+    static let ownSpaces: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone]
+
+    var display: CGDirectDisplayID?
+    /// On the display's desktop Spaces only, so it slides with them and full-screen Spaces never see it.
+    private(set) var onDesktopSpacesOnly = false
+    private var placementFailures = 0
+
+    func placeInSpaces(display: CGDirectDisplayID) {
+        guard SkyLight.canPlaceInSpaces, placementFailures < 3, isVisible else { return }
+        if !onDesktopSpacesOnly { collectionBehavior = Self.ownSpaces; scrim.collectionBehavior = Self.ownSpaces }
+        let wins = scrim.isVisible ? [windowNumber, scrim.windowNumber] : [windowNumber]
+        if SkyLight.placeOnDesktopSpaces(wins, display: display) {
+            onDesktopSpacesOnly = true
+            placementFailures = 0
+        } else {
+            placementFailures += 1
+            onDesktopSpacesOnly = false
+            collectionBehavior = Self.allSpaces; scrim.collectionBehavior = Self.allSpaces
+        }
     }
 
     override func orderOut(_ sender: Any?) {
@@ -303,7 +382,10 @@ final class OverlayWindow: NSPanel {
         scrim.view.dark = bar.isDark
         scrim.view.barHeight = frame.height
         if isVisible && a0 > 0.005 {
-            if !scrim.isVisible { scrim.orderFrontRegardless() }
+            if !scrim.isVisible {
+                scrim.orderFrontRegardless()
+                if onDesktopSpacesOnly, let display { placeInSpaces(display: display) }
+            }
         } else if scrim.isVisible {
             scrim.orderOut(nil)
         }

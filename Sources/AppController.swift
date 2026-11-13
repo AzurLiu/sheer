@@ -23,6 +23,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Sheer then stays out of the way and the system menu bar shows as usual.
     private(set) var unsupported = false
     private var orderingFailures: [CGDirectDisplayID: Int] = [:]
+    private var lastFullScreen: [CGDirectDisplayID: Bool] = [:]
+    /// Until then a Space switch may still be animating (the system menu bars are in motion).
+    private var switchingUntil = Date.distantPast
     private var warnedUnsupported = false
     let updates = UpdateChecker()
 
@@ -61,6 +64,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(selfCheck), name: NSNotification.Name("sheer.selfcheck"), object: nil)
         dnc.addObserver(self, selector: #selector(testUnsupported), name: NSNotification.Name("sheer.test-unsupported"), object: nil)
         dnc.addObserver(self, selector: #selector(spaceChanged), name: NSNotification.Name("sheer.test-space"), object: nil)
+        dnc.addObserver(self, selector: #selector(testSwitch(_:)), name: NSNotification.Name("sheer.test-switch"), object: nil)
+        dnc.addObserver(self, selector: #selector(testLevel(_:)), name: NSNotification.Name("sheer.test-level"), object: nil)
         #endif
         watchWallpaperStore()
 
@@ -118,6 +123,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     #if SHEER_DEBUG
     @objc private func testUnsupported() { warnedUnsupported = true; markUnsupported() }
+    /// Animated Space switch (Control-Left/Right), so Space transitions can be tested unattended.
+    @objc private func testSwitch(_ n: Notification) {
+        let key: CGKeyCode = (n.object as? String) == "left" ? 123 : 124
+        let src = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: down)
+            e?.flags = [.maskControl, .maskSecondaryFn, .maskNumericPad]
+            e?.post(tap: .cghidEventTap)
+        }
+    }
+    /// "level:sublevel" for the overlay windows, to try out orderings.
+    @objc private func testLevel(_ n: Notification) {
+        let parts = ((n.object as? String) ?? "").split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return }
+        for w in overlays.values {
+            w.level = NSWindow.Level(rawValue: parts[0])
+            SkyLight.setSubLevel(w.windowNumber, Int32(parts[1]))
+            w.orderFrontRegardless()
+        }
+        Debug.write("level \(parts)\n", "level.txt")
+    }
     /// Menu titles as they'd appear right now (for the self-check).
     func menuTitlesForTesting() -> [String] {
         let m = NSMenu(); menuNeedsUpdate(m); return m.items.map { $0.isSeparatorItem ? "---" : $0.title }
@@ -230,6 +256,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.reloadWallpapers() }
     }
     @objc private func spaceChanged() {
+        switchingUntil = Date() + 1.5
+        placeInSpaces()   // picks up newly created desktop Spaces
         retrySupport()
         reloadWallpapers(); reader.scheduleRefresh()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.reloadWallpapers() }
@@ -270,13 +298,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ids = Set(NSScreen.screens.map(\.displayID))
         for (id, w) in overlays where !ids.contains(id) { w.orderOut(nil); overlays[id] = nil }
         for screen in NSScreen.screens where overlays[screen.displayID] == nil {
-            overlays[screen.displayID] = OverlayWindow()
+            let w = OverlayWindow()
+            w.display = screen.displayID
+            overlays[screen.displayID] = w
         }
         syncAppearance()
         layoutOverlays(bars)
         reloadWallpapers()
         applyTitles()
         updateVisibility(bars)
+    }
+
+    private func placeInSpaces() {
+        for (id, w) in overlays where w.isVisible { w.placeInSpaces(display: id) }
     }
 
     private func screen(for id: CGDirectDisplayID) -> NSScreen? { NSScreen.screens.first { $0.displayID == id } }
@@ -333,6 +367,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let activeOrigin = activeID.map { CGDisplayBounds($0).origin } ?? .zero
         for (id, w) in overlays {
+            // A full-screen app's menus aren't shown on the desktop Spaces the overlay lives in; keep the
+            // desktop's titles so they're right while the desktop slides back in.
+            if w.onDesktopSpacesOnly && SkyLight.isFullScreenSpace(id) { continue }
             let db = CGDisplayBounds(id)
             if id == activeID {
                 w.bar.origin = db.origin
@@ -370,6 +407,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let period = wallpapers.needsCapture ? 300 : 900   // live/dynamic wallpapers change over time
         if tick % period == 0 { wallpapers.invalidate(); reloadWallpapers() }
         if tick % 600 == 0 { retrySupport() }
+        if tick % 5 == 0 { placeInSpaces() }
 
         let current = SystemMenuBars.refresh(menuBarIDs)
         if current.count != menuBarIDs.count || current.isEmpty { rebuildOverlays(); return }
@@ -380,7 +418,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// If the system menu bar ends up above the overlay, re-apply the sublevel. If that keeps failing
     /// (e.g. a macOS update changed the private API), give up and leave the system menu bar alone.
     private func ensureOrdering(_ bars: [SystemMenuBar]) {
-        for (id, w) in overlays where w.isVisible {
+        for (id, w) in overlays where w.isVisible && w.isOnActiveSpace {
             guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(w.windowNumber)) as? [[String: Any]]
             else { continue }
             // Only this display's on-screen menu bar counts; Space switches can briefly reorder windows.
@@ -402,10 +440,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bars = bars ?? SystemMenuBars.refresh(menuBarIDs)
         let drawable = reader.isDrawable
         for (id, w) in overlays {
+            let fullScreen = SkyLight.isFullScreenSpace(id)
+            // Placed on desktop Spaces only, the overlay isn't in full-screen ones anyway; keeping it
+            // ordered in lets it slide in and out with the desktop instead of popping.
+            // Mid-switch the system menu bars slide sideways, so none sits on this display: keep the
+            // overlay as it is rather than popping it out and back in.
+            let bar = menuBar(for: id, in: bars)
+            if fullScreen != lastFullScreen[id] { lastFullScreen[id] = fullScreen; switchingUntil = Date() + 1.5 }
+            let switching = bar == nil || (bar?.onScreen != true && Date() < switchingUntil)
+            if w.onDesktopSpacesOnly && w.isVisible && (fullScreen || switching) { w.syncScrim(); continue }
             let db = CGDisplayBounds(id)
-            let barAtTop = !SkyLight.isFullScreenSpace(id)
-                && (menuBar(for: id, in: bars).map { $0.onScreen && abs($0.bounds.minY - db.minY) < 0.5 } ?? false)
+            let barAtTop = !fullScreen && (bar.map { $0.onScreen && abs($0.bounds.minY - db.minY) < 0.5 } ?? false)
             let show = !unsupported && AXIsProcessTrusted() && drawable && barAtTop && w.bar.wallpaper != nil
+            #if SHEER_DEBUG
+            if show != w.isVisible {
+                let mb = bar
+                Debug.append("\(Date().timeIntervalSince1970) show=\(show) visible=\(w.isVisible) active=\(w.isOnActiveSpace) fs=\(fullScreen) drawable=\(drawable) bar=\(mb.map { "\($0.windowID) on=\($0.onScreen) y=\($0.bounds.minY)" } ?? "nil") all=\(bars.map { "\($0.windowID):\($0.onScreen):\($0.bounds.minY)" })\n", "vis.txt")
+            }
+            #endif
             if show && !w.isVisible { w.show() }
             else if !show && w.isVisible { w.orderOut(nil) }
             w.syncScrim()

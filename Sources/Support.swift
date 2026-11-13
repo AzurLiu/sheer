@@ -20,6 +20,12 @@ enum Debug {
         try? text.write(toFile: path(name), atomically: true, encoding: .utf8)
     }
 
+    static func append(_ text: String, _ name: String) {
+        guard enabled else { return }
+        if let h = FileHandle(forWritingAtPath: path(name)) { h.seekToEndOfFile(); h.write(Data(text.utf8)); h.closeFile() }
+        else { write(text, name) }
+    }
+
     static func write(_ img: CGImage?, _ name: String) {
         guard enabled, let img else { return }
         writePNG(img, path(name))

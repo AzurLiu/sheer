@@ -17,7 +17,7 @@ extension AppController {
         for (_, w) in overlays {
             let above = (CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(w.windowNumber)) as? [[String: Any]]) ?? []
             let menubarAbove = above.contains { ($0[kCGWindowName as String] as? String) == "Menubar" }
-            report += "overlay \(w.windowNumber): visible=\(w.isVisible) menubarAbove=\(menubarAbove) scrimTop=\(w.bar.scrimTop)\n"
+            report += "overlay \(w.windowNumber): visible=\(w.isVisible) desktopSpacesOnly=\(w.onDesktopSpacesOnly) onActiveSpace=\(w.isOnActiveSpace) menubarAbove=\(menubarAbove) scrimTop=\(w.bar.scrimTop)\n"
         }
         report += "update: \(updates.available ?? "none")  icon: \(statusItem.button?.image?.size ?? .zero)\n"
         report += "menu: \(menuTitlesForTesting())\n"
