@@ -544,6 +544,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick += 1
         let period = wallpapers.needsCapture ? 300 : 900   // live/dynamic wallpapers change over time
         if tick % period == 0 { wallpapers.invalidate(); reloadWallpapers() }
+        else if wallpapers.followsSun && tick % 60 == 0 { reloadWallpapers() }   // redraws only if the frame changed
         if tick % 600 == 0 { retrySupport() }
         if tick % 30 == 0 { observeDock() }
         if tick % 5 == 0 { placeInSpaces() }
