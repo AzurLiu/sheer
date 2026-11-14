@@ -2,8 +2,13 @@
 
 <h1 align="center">Sheer</h1>
 
-<p align="center">A macOS 26/27-style transparent menu bar for <b>macOS 15 Sequoia</b>.<br>
+<p align="center"><b>The macOS 26 menu bar, without the macOS 26 upgrade.</b><br>
+A transparent menu bar for <b>macOS 15 Sequoia</b>. Free, open source, about 1 MB, nothing to configure.<br>
 <a href="#中文说明">中文说明</a></p>
+
+Staying on Sequoia, but like how the menu bar looks on macOS 26? Sheer gives you that one thing and changes nothing else. Your wallpaper runs right to the top edge of the screen, and the menu bar keeps working exactly as before.
+
+**Try it in a minute:** [download](../../releases/latest), drag it to Applications, open it. If it isn't for you, quit it and drag it to the Trash.
 
 **Before** — the standard macOS 15 menu bar:
 
@@ -13,7 +18,9 @@
 
 ![macOS 15 menu bar with Sheer](docs/after.jpg)
 
-Sheer removes the frosted background of the macOS 15 menu bar so your wallpaper shows straight through — the way the menu bar looks on macOS 26 and 27. Like those systems, the menu titles take the same light or dark colour as the status items, and a faint gradient keeps them readable — stronger only where the wallpaper behind them needs it.
+Sheer removes the frosted background of the macOS 15 menu bar so your wallpaper shows straight through, the way it does on macOS 26 and 27. Like those systems, the menu titles take the same light or dark colour as the status items, and a faint gradient keeps them readable, stronger only where the wallpaper behind them needs it.
+
+Why it doesn't feel like an add-on:
 
 - **English, 简体中文, 繁體中文.** The menu follows your system language.
 - **Native-looking.** Menu titles, the Apple logo and the selection highlight are drawn at the exact size and position of the real menu bar (measured pixel-by-pixel against macOS 15). Clicks go straight to the real menu bar, so everything works as usual.
@@ -101,12 +108,20 @@ Releases are built by GitHub Actions when a `v*` tag is pushed.
 
 ## 中文说明
 
-Sheer 让 **macOS 15 Sequoia** 的菜单栏变成 macOS 26/27 那样的透明效果：去掉毛玻璃背景，直接显示壁纸。和新系统一样，菜单文字与右侧状态栏图标同色，并加一层极淡的渐变保证文字清晰——只在壁纸需要的地方才加深。
+**不升级系统，也能用上 macOS 26 的透明菜单栏。**
+
+还留在 **macOS 15 Sequoia**，但喜欢 macOS 26 菜单栏的样子？Sheer 只做这一件事：去掉菜单栏的毛玻璃背景，让壁纸一直铺到屏幕最上沿，别的什么都不改，菜单栏的用法和原来完全一样。免费、开源、约 1 MB、没有任何设置。
+
+**一分钟就能试：** [下载](../../releases/latest)，拖进「应用程序」，打开。不喜欢的话，退出后拖进废纸篓就行。
+
+和新系统一样，菜单文字与右侧状态栏图标同色，并加一层极淡的渐变保证文字清晰，只在壁纸需要的地方才加深。
 
 真实截图对比（上：macOS 15 原生菜单栏；下：开启 Sheer 后）：
 
 ![macOS 15 原生菜单栏](docs/before.jpg)
 ![开启 Sheer 后](docs/after.jpg)
+
+用起来不像外挂的原因：
 
 - **和原生一致**：菜单文字、苹果标志、选中高亮的大小和位置都与 macOS 15 原生菜单栏逐像素对齐；点击直接穿透到真实菜单栏，用法完全不变。
 - **自动跟随壁纸**：换壁纸后自动更新并淡入淡出，颜色和桌面完全一致（包括广色域壁纸）。普通图片和动态壁纸直接读取文件，动态壁纸会像桌面一样随太阳变化；Sequoia 等实时渲染壁纸从屏幕同步，解锁时的动画也会跟着动。
