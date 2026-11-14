@@ -347,7 +347,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func syncAppearance() {
         let ap = statusItem.button?.effectiveAppearance
-        for w in overlays.values { w.appearance = ap; w.bar.appearance = ap }
+        for w in overlays.values { w.appearance = ap; w.bar.appearance = ap; w.syncScrim() }
     }
 
     private func reloadWallpapers() {

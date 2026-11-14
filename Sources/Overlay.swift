@@ -136,22 +136,10 @@ final class BarView: NSView {
     override var isOpaque: Bool { true }
     override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
 
-    /// Light text on a dark gradient (true) or dark text on a light one. Like macOS 26, the text follows
-    /// the wallpaper: whichever colour needs less gradient along the whole bar wins, so a bright
-    /// wallpaper isn't muddied by a dark gradient and a dark, busy one isn't washed out by a light one.
-    /// On a near tie it follows the system (the status items' own colour).
-    var isDark: Bool {
-        let system = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        guard wallpaper != nil, !colDark.isEmpty else { return system }
-        let light = scrimCost(darkText: false), dark = scrimCost(darkText: true)
-        return system ? !(dark + 0.02 < light) : light + 0.02 < dark
-    }
-
-    /// Mean backing opacity the text would need across the bar, column by column.
-    private func scrimCost(darkText: Bool) -> CGFloat {
-        let lums = darkText ? colDark : colBright
-        return lums.reduce(0) { $0 + Scrim.alpha(lum: $1, darkText: darkText) } / CGFloat(max(1, lums.count))
-    }
+    /// Light text on a dark gradient (true) or dark text on a light one. Like macOS 26, the titles always
+    /// match the status items, whose colour the system picks from the wallpaper; the gradient then adds
+    /// only what that colour needs to stay readable. (The view's appearance is the status items'.)
+    var isDark: Bool { effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
 
     // Per column (left to right): the darkest and brightest luminance under the bar.
     private var colDark: [CGFloat] = []
