@@ -229,14 +229,20 @@ final class WallpaperProvider {
             drawn = CGRect(x: (sw - iw * s) / 2, y: (sh - ih * s) / 2, width: iw * s, height: ih * s)
         }
 
+        // The desktop shows a wallpaper's own values unconverted on the display's gamut: sRGB images look
+        // more saturated than a colour-managed copy, Display P3 ones (e.g. Ventura) look as authored.
+        // So keep the image's numbers — render in its own RGB space — and tag the result with the display's.
+        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+        let space = full.colorSpace.flatMap { $0.model == .rgb && $0.supportsOutput ? $0 : nil } ?? sRGB
         let scale = screen.scale
         let W = Int((sw * scale).rounded()), H = Int((barHeight * scale).rounded())
         guard W > 0, H > 0,
               let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  space: space,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return nil }
         ctx.interpolationQuality = .high
-        ctx.setFillColor((fill.usingColorSpace(.sRGB) ?? .black).cgColor)
+        let fillSRGB = (fill.usingColorSpace(.sRGB) ?? .black).cgColor
+        ctx.setFillColor(CGColor(colorSpace: space, components: fillSRGB.components ?? [0, 0, 0, 1]) ?? fillSRGB)
         ctx.fill(CGRect(x: 0, y: 0, width: W, height: H))
 
         // Decode only the rows under the menu bar (tiled HEICs decode just their top tiles: ~¼ the memory).
@@ -248,8 +254,6 @@ final class WallpaperProvider {
         let h = (y1 - y0) / k
         ctx.draw(part, in: CGRect(x: drawn.minX * scale, y: (barHeight - top - h) * scale,
                                   width: drawn.width * scale, height: h * scale))
-        // The desktop shows a wallpaper's sRGB values unconverted on the display's own (wider) gamut,
-        // so it looks more saturated than a colour-managed copy. Tag the strip the same way to match it.
         guard let made = ctx.makeImage() else { return nil }
         let img = screen.colorSpace.flatMap { made.copy(colorSpace: $0) } ?? made
         fileCache[screen.id] = (key, img)
