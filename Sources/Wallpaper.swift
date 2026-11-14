@@ -10,6 +10,7 @@
 import AppKit
 import AVFoundation
 import ScreenCaptureKit
+import VideoToolbox
 
 final class WallpaperProvider {
     enum Source: Equatable {
@@ -87,26 +88,41 @@ final class WallpaperProvider {
 
     // MARK: Capture
 
-    private func captureStrip(for screen: NSScreen, barHeight: CGFloat, completion: @escaping (CGImage?) -> Void) {
+    /// The Dock's wallpaper window on this display.
+    private static func wallpaperWindow(for screen: NSScreen) async throws -> SCWindow? {
         let displayBounds = CGDisplayBounds(screen.displayID)
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        return content.windows.first(where: {
+            ($0.title ?? "").hasPrefix("Wallpaper") &&
+            $0.owningApplication?.bundleIdentifier == "com.apple.dock" &&
+            abs($0.frame.minX - displayBounds.minX) < 1 && abs($0.frame.minY - displayBounds.minY) < 1
+        })
+    }
+
+    static func mirrorWindow(for screen: NSScreen) async throws -> SCWindow? { try await wallpaperWindow(for: screen) }
+    static func mirrorConfig(_ win: SCWindow, barHeight: CGFloat, scale: CGFloat) -> SCStreamConfiguration {
+        stripConfig(win, barHeight: barHeight, scale: scale)
+    }
+
+    private static func stripConfig(_ win: SCWindow, barHeight: CGFloat, scale: CGFloat) -> SCStreamConfiguration {
+        let cfg = SCStreamConfiguration()
+        cfg.sourceRect = CGRect(x: 0, y: 0, width: win.frame.width, height: barHeight)
+        cfg.width = Int(win.frame.width * scale)
+        cfg.height = Int(barHeight * scale)
+        cfg.showsCursor = false
+        cfg.ignoreShadowsSingleWindow = true
+        return cfg
+    }
+
+    private func captureStrip(for screen: NSScreen, barHeight: CGFloat, completion: @escaping (CGImage?) -> Void) {
         let scale = screen.backingScaleFactor
         Task {
             var image: CGImage?
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                if let win = content.windows.first(where: {
-                    ($0.title ?? "").hasPrefix("Wallpaper") &&
-                    $0.owningApplication?.bundleIdentifier == "com.apple.dock" &&
-                    abs($0.frame.minX - displayBounds.minX) < 1 && abs($0.frame.minY - displayBounds.minY) < 1
-                }) {
-                    let cfg = SCStreamConfiguration()
-                    cfg.sourceRect = CGRect(x: 0, y: 0, width: win.frame.width, height: barHeight)
-                    cfg.width = Int(win.frame.width * scale)
-                    cfg.height = Int(barHeight * scale)
-                    cfg.showsCursor = false
-                    cfg.ignoreShadowsSingleWindow = true
+                if let win = try await Self.wallpaperWindow(for: screen) {
                     image = try await SCScreenshotManager.captureImage(
-                        contentFilter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg)
+                        contentFilter: SCContentFilter(desktopIndependentWindow: win),
+                        configuration: Self.stripConfig(win, barHeight: barHeight, scale: scale))
                 }
             } catch {
                 NSLog("Sheer: wallpaper capture failed: \(error)")
@@ -372,5 +388,53 @@ enum Solar {
         var az = atan2(sin(ha * r), cos(ha * r) * sin(lat * r) - tan(decl) * cos(lat * r)) / r + 180
         az = az.truncatingRemainder(dividingBy: 360)
         return (90 - zen / r, az)
+    }
+}
+
+
+// MARK: - Live mirror
+
+/// Streams the strip of a live-rendered wallpaper while it moves (it plays a short animation as the
+/// screen unlocks), so the bar moves with it instead of catching up with crossfades afterwards.
+final class LiveMirror: NSObject, SCStreamOutput {
+    private var stream: SCStream?
+    private let queue = DispatchQueue(label: "sheer.mirror")
+    private let onFrame: (CGImage) -> Void
+
+    init(onFrame: @escaping (CGImage) -> Void) { self.onFrame = onFrame }
+
+    static func start(for screen: NSScreen, barHeight: CGFloat, seconds: TimeInterval,
+                      onFrame: @escaping (CGImage) -> Void) -> LiveMirror {
+        let m = LiveMirror(onFrame: onFrame)
+        let scale = screen.backingScaleFactor
+        Task {
+            guard let win = try? await WallpaperProvider.mirrorWindow(for: screen) else { return }
+            let cfg = WallpaperProvider.mirrorConfig(win, barHeight: barHeight, scale: scale)
+            cfg.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            cfg.queueDepth = 3
+            let s = SCStream(filter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg, delegate: nil)
+            do {
+                try s.addStreamOutput(m, type: .screen, sampleHandlerQueue: m.queue)
+                try await s.startCapture()
+                m.stream = s
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { m.stop() }
+            } catch {
+                NSLog("Sheer: live mirror failed: \(error)")
+            }
+        }
+        return m
+    }
+
+    func stop() {
+        stream?.stopCapture { _ in }
+        stream = nil
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, sb.isValid, let pb = sb.imageBuffer else { return }
+        var img: CGImage?
+        VTCreateCGImageFromCVPixelBuffer(pb, options: nil, imageOut: &img)
+        guard let img else { return }
+        DispatchQueue.main.async { [weak self] in self?.onFrame(img) }
     }
 }

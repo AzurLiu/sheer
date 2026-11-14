@@ -70,6 +70,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(spaceChanged), name: NSNotification.Name("sheer.test-space"), object: nil)
         dnc.addObserver(self, selector: #selector(testSwitch(_:)), name: NSNotification.Name("sheer.test-switch"), object: nil)
         dnc.addObserver(self, selector: #selector(testLevel(_:)), name: NSNotification.Name("sheer.test-level"), object: nil)
+        dnc.addObserver(self, selector: #selector(testMirror), name: NSNotification.Name("sheer.test-mirror"), object: nil)
         #endif
         watchWallpaperStore()
         observeDock()
@@ -138,6 +139,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             e?.post(tap: .cghidEventTap)
         }
     }
+    @objc private func testMirror() { mirrorWhileSettling() }
     /// "level:sublevel" for the overlay windows, to try out orderings.
     @objc private func testLevel(_ n: Notification) {
         let parts = ((n.object as? String) ?? "").split(separator: ":").compactMap { Int($0) }
@@ -256,9 +258,36 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func screensChanged() { retrySupport(); rebuildOverlays() }
     @objc private func wakeUp() {
+        track(for: 2)   // the menu bar slides in as the screen unlocks: follow it frame by frame
+        quietUntil = Date() + 1.5
+        #if SHEER_DEBUG
+        Debug.append(String(format: "%.3f wakeUp\n", Date().timeIntervalSince1970), "vis.txt")
+        #endif
         retrySupport()
-        rebuildOverlays()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.reloadWallpapers() }
+        rebuildOverlays()   // its wallpaper reload waits for quietUntil
+        mirrorWhileSettling()
+    }
+
+    /// A live-rendered wallpaper plays a few seconds of motion as the screen unlocks. Stream it into the
+    /// bar meanwhile, frame by frame, so the bar moves with the desktop instead of catching up later.
+    private var mirrors: [LiveMirror] = []
+    private func mirrorWhileSettling() {
+        guard wallpapers.needsCapture, CGPreflightScreenCaptureAccess() else { return }
+        let seconds = 5.0
+        quietUntil = max(quietUntil, Date() + seconds + 0.3)
+        mirrors.forEach { $0.stop() }
+        let bars = SystemMenuBars.refresh(menuBarIDs)
+        mirrors = overlays.compactMap { id, w in
+            guard let screen = screen(for: id) else { return nil }
+            return LiveMirror.start(for: screen, barHeight: barHeight(for: screen, bars: bars), seconds: seconds) { [weak w] img in
+                guard let w else { return }
+                w.bar.live = true
+                w.bar.wallpaper = img
+                w.bar.live = false
+                w.syncScrim()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds + 0.1) { [weak self] in self?.mirrors = [] }
     }
     @objc private func spaceChanged() {
         switchingUntil = Date() + 1.5
@@ -350,13 +379,36 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for w in overlays.values { w.appearance = ap; w.bar.appearance = ap; w.syncScrim() }
     }
 
+    /// While locked, and until the desktop has settled after unlocking, the screen shows the lock
+    /// screen or its fade: a live wallpaper captured then comes out different each time, and every
+    /// change crossfades the bar. Hold reloads until then and do a single one.
+    private var quietUntil = Date.distantPast
+    private var deferredReload = false
+    private var screenLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
     private func reloadWallpapers() {
+        let wait = quietUntil.timeIntervalSinceNow
+        if wait > 0 || screenLocked {
+            if !deferredReload {
+                deferredReload = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + max(wait, 1)) { [weak self] in
+                    self?.deferredReload = false
+                    self?.reloadWallpapers()
+                }
+            }
+            return
+        }
         let bars = SystemMenuBars.refresh(menuBarIDs)
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         for (id, w) in overlays {
             guard let screen = screen(for: id) else { continue }
             wallpapers.strip(for: screen, barHeight: barHeight(for: screen, bars: bars), dark: dark) { [weak self] img in
                 if let img, let old = w.bar.wallpaper, ImageCompare.looksSame(img, old) { return }   // unchanged
+                #if SHEER_DEBUG
+                Debug.append(String(format: "%.3f wallpaper applied (changed)\n", Date().timeIntervalSince1970), "vis.txt")
+                #endif
                 w.bar.wallpaper = img
                 self?.updateVisibility()
             }
@@ -416,6 +468,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             RunLoop.main.add(fastTimer!, forMode: .common)
         }
+    }
+
+    /// Follow the system menu bar at display rate for a while (it is sliding in or out).
+    private var trackTimer: Timer?
+    private var trackUntil = Date.distantPast
+    private func track(for seconds: TimeInterval) {
+        trackUntil = max(trackUntil, Date() + seconds)
+        guard trackTimer == nil else { return }
+        trackTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.updateVisibility()
+            if Date() > self.trackUntil { self.trackTimer?.invalidate(); self.trackTimer = nil }
+        }
+        RunLoop.main.add(trackTimer!, forMode: .common)
     }
 
     // MARK: Mission Control
@@ -594,8 +660,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let switching = bar == nil || (bar?.onScreen != true && Date() < switchingUntil)
             if w.onDesktopSpacesOnly && w.isVisible && (fullScreen || switching) { w.syncScrim(); continue }
             let db = CGDisplayBounds(id)
-            let barAtTop = !fullScreen && (bar.map { $0.onScreen && abs($0.bounds.minY - db.minY) < 0.5 } ?? false)
-            let show = !unsupported && AXIsProcessTrusted() && drawable && barAtTop && w.bar.wallpaper != nil
+            // How far the system bar sits above the top of the screen: 0 at rest; part of its height while
+            // it slides in or out (unlocking, an auto-hiding bar), when the overlay rides along.
+            let raised = bar.flatMap { b in !fullScreen && b.onScreen ? db.minY - b.bounds.minY : nil }
+            let barAtTop = raised.map { abs($0) < 0.5 } ?? false
+            let sliding = raised.map { $0 >= 0.5 && $0 < (bar?.bounds.height ?? 0) - 0.5 } ?? false
+            if sliding { track(for: 0.3) }   // keep up with the rest of the slide
+            let show = !unsupported && AXIsProcessTrusted() && drawable && (barAtTop || sliding) && w.bar.wallpaper != nil
+            w.raise = sliding ? (raised ?? 0) : 0
             #if SHEER_DEBUG
             if show != w.isVisible {
                 let mb = bar

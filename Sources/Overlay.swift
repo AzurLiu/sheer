@@ -113,8 +113,8 @@ struct WindowShadow: Equatable {
 final class BarView: NSView {
     var wallpaper: CGImage? {
         didSet {
-            // Crossfade like the system's own wallpaper transition.
-            if oldValue != nil, wallpaper != nil, window?.isVisible == true, let layer {
+            // Crossfade like the system's own wallpaper transition (not while mirroring a moving one).
+            if !live, oldValue != nil, wallpaper != nil, window?.isVisible == true, let layer {
                 let t = CATransition()
                 t.type = .fade
                 t.duration = 0.45
@@ -125,6 +125,8 @@ final class BarView: NSView {
             needsDisplay = true
         }
     }
+    /// Frames of a moving wallpaper are arriving: show each as is.
+    var live = false
     var titles: [MenuTitle] = [] { didSet { if titles != oldValue { needsDisplay = true } } }
     /// Offset from global menu-title coordinates to this view's coordinates.
     var origin: CGPoint = .zero { didSet { if origin != oldValue { needsDisplay = true } } }
@@ -517,17 +519,31 @@ final class OverlayWindow: NSPanel {
         }
     }
 
+    /// Resting frames of the bar and the gradient below it, before any offset.
+    private var base: (bar: NSRect, scrim: NSRect)?
+    /// How far (points) the system menu bar currently sits above its resting place while it slides
+    /// in or out (unlocking, an auto-hiding bar); the overlay and gradient ride along with it.
+    var raise: CGFloat = 0 {
+        didSet { if raise != oldValue, let base, !sliding { place(base.bar, base.scrim) } }
+    }
+
     func layout(screenFrame: NSRect, barHeight: CGFloat) {
         guard !sliding else { return }
         let f = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight, width: screenFrame.width, height: barHeight)
+        let h = barHeight * (Scrim.spread - 1)
+        let s = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight - h, width: screenFrame.width, height: h)
+        base = (f, s)
+        place(f, s)
+    }
+
+    private func place(_ barFrame: NSRect, _ scrimFrame: NSRect) {
+        let f = barFrame.offsetBy(dx: 0, dy: raise), s = scrimFrame.offsetBy(dx: 0, dy: raise)
         if frame != f {
             #if SHEER_DEBUG
             Debug.append(String(format: "%.3f layout %@ -> %@\n", Date().timeIntervalSince1970, NSStringFromRect(frame), NSStringFromRect(f)), "layout.txt")
             #endif
             setFrame(f, display: true)
         }
-        let h = barHeight * (Scrim.spread - 1)
-        let s = NSRect(x: screenFrame.minX, y: screenFrame.maxY - barHeight - h, width: screenFrame.width, height: h)
         if scrim.frame != s { scrim.setFrame(s, display: true) }
     }
 }
