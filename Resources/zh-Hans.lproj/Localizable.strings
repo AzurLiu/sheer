@@ -24,3 +24,8 @@
 "alert.unsupported.body" = "Sheer 暂时无法把图层保持在菜单栏之上，所以先显示系统菜单栏。Sheer 会自动重试；如果反复出现，请检查 Sheer 是否有更新。";
 "alert.login-item.title" = "无法设置登录项";
 "alert.login-item.body" = "请先把 Sheer.app 放进「应用程序」文件夹再试。";
+
+"alert.update.title" = "Sheer %@ 可以更新了";
+"alert.update.body" = "下载后替换「应用程序」里的 Sheer，再按弹出的授权窗口重新打开一次开关：系统会把每个版本当成新的应用。";
+"alert.update.download" = "去下载";
+"alert.update.later" = "以后再说";

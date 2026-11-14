@@ -77,7 +77,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         observeDock()
 
         if !SkyLight.isAvailable { markUnsupported() }
-        updates.onChange = { [weak self] in self?.updateStatusIcon() }
+        updates.onChange = { [weak self] in self?.updateStatusIcon(); self?.announceUpdate() }
         updates.start()
         if !AXIsProcessTrusted() { showSetup() }
 
@@ -117,6 +117,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         a.messageText = title
         a.informativeText = body
         a.runModal()
+    }
+
+    /// A newer version: say so once per version, with what it changes. The menu item and the dot on
+    /// the status icon stay for those who choose Later.
+    private func announceUpdate() {
+        guard let version = updates.available,
+              UserDefaults.standard.string(forKey: "announcedVersion") != version else { return }
+        UserDefaults.standard.set(version, forKey: "announcedVersion")
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = String(format: L("alert.update.title"), version)
+        a.informativeText = [updates.notes, L("alert.update.body")].compactMap { $0 }.joined(separator: "\n\n")
+        a.addButton(withTitle: L("alert.update.download"))
+        a.addButton(withTitle: L("alert.update.later"))
+        if a.runModal() == .alertFirstButtonReturn { openReleases() }
     }
 
     private func markUnsupported() {

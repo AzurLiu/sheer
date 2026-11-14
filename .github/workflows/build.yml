@@ -31,4 +31,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/Sheer.zip \
             --title "Sheer $GITHUB_REF_NAME" \
-            --notes "Unzip, move Sheer.app to Applications, then open it. The first time, allow it under System Settings → Privacy & Security → Open Anyway."
+            --notes-file ReleaseNotes.md

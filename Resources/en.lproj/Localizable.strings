@@ -24,3 +24,8 @@
 "alert.unsupported.body" = "Sheer couldn't keep its layer above the menu bar, so the system menu bar is shown as usual. Sheer will try again automatically. If this keeps happening, please check for a Sheer update.";
 "alert.login-item.title" = "Couldn't change the login item";
 "alert.login-item.body" = "Move Sheer.app to the Applications folder and try again.";
+
+"alert.update.title" = "Sheer %@ is available";
+"alert.update.body" = "Download it, replace Sheer in Applications, and turn Sheer on again in the permissions window that opens: macOS treats each version as a new app.";
+"alert.update.download" = "Download";
+"alert.update.later" = "Later";

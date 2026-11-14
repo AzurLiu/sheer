@@ -1,6 +1,7 @@
-// Update check: once a day, ask GitHub for the latest release's version number. If it's newer,
-// the Sheer menu shows "Update Available" linking to the download page. Nothing is downloaded or
-// installed automatically, and nothing about the Mac is sent.
+// Update check: once a day, ask GitHub for the latest release's version number and notes. If it's
+// newer, Sheer says so once (what changed, with a Download button) and its menu keeps an "Update
+// Available" item linking to the download page. Nothing is downloaded or installed automatically,
+// and nothing about the Mac is sent.
 
 import Foundation
 
@@ -11,6 +12,8 @@ final class UpdateChecker {
 
     /// Newer version available (e.g. "1.0.3"), or nil.
     private(set) var available: String?
+    /// What the newer version changes, in the user's language when the release has it.
+    var notes: String? { Self.localized(defaults.string(forKey: "latestNotes")) }
     var onChange: (() -> Void)?
 
     private let defaults = UserDefaults.standard
@@ -39,6 +42,7 @@ final class UpdateChecker {
                 guard let self else { return }
                 self.defaults.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
                 self.defaults.set(version, forKey: "latestVersion")
+                self.defaults.set(json["body"] as? String, forKey: "latestNotes")
                 Debug.write("\(Date()) latest=\(version) current=\(self.current)\n", "update.txt")
                 self.apply(version)
             }
@@ -48,6 +52,17 @@ final class UpdateChecker {
     private func apply(_ latest: String?) {
         let newer = latest.flatMap { Self.isNewer($0, than: current) ? $0 : nil }
         if newer != available { available = newer; onChange?() }
+    }
+
+    /// Release notes are written as "English\n---\n中文\n---\ninstall instructions": pick the reader's part.
+    static func localized(_ body: String?) -> String? {
+        guard let body else { return nil }
+        let parts = body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n---\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count >= 3 else { return nil }   // older releases only carry the install instructions
+        let chinese = Locale.preferredLanguages.first?.hasPrefix("zh") == true
+        let text = String(parts[chinese ? 1 : 0].prefix(600))
+        return text.isEmpty ? nil : text
     }
 
     static func isNewer(_ a: String, than b: String) -> Bool {

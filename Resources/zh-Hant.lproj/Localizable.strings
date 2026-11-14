@@ -24,3 +24,8 @@
 "alert.unsupported.body" = "Sheer 暫時無法把圖層保持在選單列之上，所以先顯示系統選單列。Sheer 會自動重試；如果反覆出現，請檢查 Sheer 是否有更新。";
 "alert.login-item.title" = "無法設定登入項目";
 "alert.login-item.body" = "請先把 Sheer.app 放進「應用程式」檔案夾再試。";
+
+"alert.update.title" = "Sheer %@ 可以更新了";
+"alert.update.body" = "下載後替換「應用程式」裡的 Sheer，再依彈出的授權視窗重新打開一次開關：系統會把每個版本當成新的 App。";
+"alert.update.download" = "前往下載";
+"alert.update.later" = "稍後再說";
