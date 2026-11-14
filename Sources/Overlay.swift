@@ -137,18 +137,22 @@ final class BarView: NSView {
     override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
 
     /// Light text on a dark gradient (true) or dark text on a light one. Like macOS 26, the text follows
-    /// the wallpaper: whichever colour reads with less gradient wins, so a bright wallpaper isn't muddied
-    /// by a dark gradient. On a near tie it follows the system menu bar.
+    /// the wallpaper: whichever colour needs less gradient along the whole bar wins, so a bright
+    /// wallpaper isn't muddied by a dark gradient and a dark, busy one isn't washed out by a light one.
+    /// On a near tie it follows the system (the status items' own colour).
     var isDark: Bool {
         let system = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        guard wallpaper != nil else { return system }
-        let light = scrimAlpha(darkText: false), dark = scrimAlpha(darkText: true)
-        return system ? !(dark + 0.05 < light) : light + 0.05 < dark
+        guard wallpaper != nil, !colDark.isEmpty else { return system }
+        let light = scrimCost(darkText: false), dark = scrimCost(darkText: true)
+        return system ? !(dark + 0.02 < light) : light + 0.02 < dark
     }
 
-    // Luminance of the parts of the wallpaper least favourable to text (90th / 10th percentile, linear 0…1).
-    private var lumBright: CGFloat = 0
-    private var lumDark: CGFloat = 1
+    /// Mean backing opacity the text would need across the bar, column by column.
+    private func scrimCost(darkText: Bool) -> CGFloat {
+        let lums = darkText ? colDark : colBright
+        return lums.reduce(0) { $0 + Scrim.alpha(lum: $1, darkText: darkText) } / CGFloat(max(1, lums.count))
+    }
+
     // Per column (left to right): the darkest and brightest luminance under the bar.
     private var colDark: [CGFloat] = []
     private var colBright: [CGFloat] = []
@@ -169,14 +173,6 @@ final class BarView: NSView {
         }
         colDark = (0..<128).map { x in (0..<4).map { lums[$0 * 128 + x] }.min()! }
         colBright = (0..<128).map { x in (0..<4).map { lums[$0 * 128 + x] }.max()! }
-        lums.sort()
-        lumBright = lums[Int(Double(lums.count) * 0.9)]
-        lumDark = lums[Int(Double(lums.count) * 0.1)]
-    }
-
-    /// Backing opacity needed at the text for the whole bar (used to pick the text colour).
-    func scrimAlpha(darkText: Bool) -> CGFloat {
-        Scrim.alpha(lum: darkText ? lumDark : lumBright, darkText: darkText)
     }
 
     /// Opacity at the top of the gradient, column by column: a faint base everywhere, deepened only
