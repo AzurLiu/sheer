@@ -9,6 +9,7 @@
 
 import AppKit
 import AVFoundation
+import CoreLocation
 import ScreenCaptureKit
 import VideoToolbox
 
@@ -317,33 +318,78 @@ final class WallpaperProvider {
     }
 }
 
-/// Where the sun is, for Dynamic (sun-following) wallpapers. Location comes from the time zone (its
-/// city in the system's zone.tab), which is what the desktop falls back to without Location Services.
+/// Which image of a Dynamic (sun-following) wallpaper the desktop shows. This mirrors the system's own
+/// choice (SolarDesktop in DynamicDesktop.framework; compared with it at 66,816 moments over a year
+/// and eight places, with no difference): the listed image nearest in altitude to the sun, among
+/// those listed for the same half of the day (sun rising: azimuth below 180°).
 enum Solar {
-    /// The frame for now: walking the sun's daily path, the image of the last listed sun position
-    /// passed — rising in the morning, setting in the afternoon. Matches the desktop: frame 0 (25°)
-    /// at 16° in the afternoon, frame 4 (10°) at 4°.
     static func frame(_ si: [[String: Any]], at date: Date = Date()) -> Int? {
-        guard let loc = location else { return nil }
         let entries: [(a: Double, z: Double, i: Int)] = si.compactMap {
             guard let a = ($0["a"] as? NSNumber)?.doubleValue, let z = ($0["z"] as? NSNumber)?.doubleValue,
                   let i = ($0["i"] as? NSNumber)?.intValue else { return nil }
             return (a, z, i)
         }
         guard !entries.isEmpty else { return nil }
-        let sun = position(date, lat: loc.lat, lon: loc.lon)
-        let morning = sun.az < 180
-        let half = entries.filter { ($0.z < 180) == morning }
-        guard !half.isEmpty else { return nil }
-        if morning {   // rising: highest listed altitude already reached
-            return (half.filter { $0.a <= sun.alt }.max { $0.a < $1.a } ?? half.min { $0.a < $1.a })?.i
-        } else {       // setting: lowest listed altitude not yet gone below
-            return (half.filter { $0.a >= sun.alt }.min { $0.a < $1.a } ?? half.max { $0.a < $1.a })?.i
-        }
+        let loc = location
+        let sun = systemPosition(date, lat: loc.lat, lon: loc.lon) ?? position(date, lat: loc.lat, lon: loc.lon)
+        let half = entries.filter { ($0.z < 180) == (sun.az < 180) }
+        return (half.isEmpty ? entries : half).min { abs($0.a - sun.alt) < abs($1.a - sun.alt) }?.i
     }
 
+    /// Where the desktop places the sun's observer. Allowed to use Location Services (the "Setting
+    /// time zone" system service), it takes the Mac's real position, which Sheer doesn't ask for: the
+    /// time zone's city stands in. Otherwise the desktop itself falls back to a point on the equator
+    /// at the time zone's meridian (standard offset × Earth's rotation rate), reproduced exactly here.
+    static var location: (lat: Double, lon: Double) {
+        if desktopUsesRealLocation, let city = zoneCity { return city }
+        let zone = TimeZone.current
+        let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()
+        return (0, standardOffset * 7.292115e-5 * 180 / .pi)
+    }
+
+    /// The wallpaper extensions locate the Mac on behalf of TimeZone.bundle.
+    private static var desktopUsesRealLocation: Bool {
+        if let checked, Date().timeIntervalSince(checked.at) < 60 { return checked.real }
+        var real = false
+        let sel = NSSelectorFromString("authorizationStatusForBundlePath:")
+        if CLLocationManager.locationServicesEnabled(), let method = class_getClassMethod(CLLocationManager.self, sel) {
+            typealias Fn = @convention(c) (AnyClass, Selector, NSString) -> Int32
+            let status = unsafeBitCast(method_getImplementation(method), to: Fn.self)(
+                CLLocationManager.self, sel, "/System/Library/LocationBundles/TimeZone.bundle")
+            real = status == CLAuthorizationStatus.authorizedAlways.rawValue || status == 4   // 4: when in use
+        }
+        checked = (Date(), real)
+        return real
+    }
+    private static var checked: (at: Date, real: Bool)?
+
+    /// The sun as the system computes it (GeoServices, the desktop's own source), so frames change at
+    /// the same moment. nil if that class ever goes away; the NOAA formula below then takes over.
+    private static func systemPosition(_ date: Date, lat: Double, lon: Double) -> (alt: Double, az: Double)? {
+        typealias InitFn = @convention(c) (UnsafeRawPointer, Selector, CLLocationCoordinate2D, UnsafeRawPointer, Int) -> UnsafeRawPointer?
+        typealias GetFn = @convention(c) (UnsafeRawPointer, Selector) -> Double
+        let initSel = NSSelectorFromString("initWithLocation:date:body:")
+        let altSel = NSSelectorFromString("altitude"), azSel = NSSelectorFromString("azimuth")
+        guard let cls = celestialClass, let initM = class_getInstanceMethod(cls, initSel),
+              let altM = class_getInstanceMethod(cls, altSel), let azM = class_getInstanceMethod(cls, azSel),
+              let raw = class_createInstance(cls, 0) else { return nil }
+        let allocated = Unmanaged.passRetained(raw as AnyObject).toOpaque()   // init consumes this reference
+        let nsDate = date as NSDate
+        guard let sun = unsafeBitCast(method_getImplementation(initM), to: InitFn.self)(
+            allocated, initSel, CLLocationCoordinate2D(latitude: lat, longitude: lon),
+            Unmanaged.passUnretained(nsDate).toOpaque(), 0 /* the sun */) else { return nil }
+        defer { Unmanaged<AnyObject>.fromOpaque(sun).release() }
+        let alt = unsafeBitCast(method_getImplementation(altM), to: GetFn.self)(sun, altSel)
+        let az = unsafeBitCast(method_getImplementation(azM), to: GetFn.self)(sun, azSel)
+        return alt.isFinite && az.isFinite ? (alt, az) : nil
+    }
+    private static let celestialClass: AnyClass? = {
+        dlopen("/System/Library/PrivateFrameworks/GeoServices.framework/GeoServices", RTLD_LAZY)
+        return NSClassFromString("GEOHorizontalCelestialBodyData")
+    }()
+
     /// Latitude/longitude of the current time zone's city, from /usr/share/zoneinfo/zone.tab.
-    static var location: (lat: Double, lon: Double)? {
+    private static var zoneCity: (lat: Double, lon: Double)? {
         let id = TimeZone.current.identifier
         if let cached, cached.id == id { return cached.loc }
         guard let tab = try? String(contentsOfFile: "/usr/share/zoneinfo/zone.tab", encoding: .utf8) else { return nil }
@@ -372,7 +418,7 @@ enum Solar {
         return (lat, lon)
     }
 
-    /// NOAA solar position: altitude above the horizon and azimuth clockwise from north, in degrees.
+    /// NOAA solar position (fallback): altitude above the horizon and azimuth clockwise from north, in degrees.
     static func position(_ date: Date, lat: Double, lon: Double) -> (alt: Double, az: Double) {
         let r = Double.pi / 180
         let t = (date.timeIntervalSince1970 / 86400 + 2440587.5 - 2451545) / 36525
