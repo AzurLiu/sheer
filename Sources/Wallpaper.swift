@@ -177,7 +177,10 @@ final class WallpaperProvider {
                 let dir = wallDir.appendingPathComponent(folder)
                 let files = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
                 if let heic = files.first(where: { $0.hasSuffix(".heic") }) { return .file(dir.appendingPathComponent(heic), dark: dark, solar: solar) }
-                // Video-only wallpapers (e.g. Sonoma): the desktop rests on frame 0 (verified pixel-by-pixel).
+                // Video-only folders: the desktop rests on the still of the same name when there is one
+                // (verified: Sonoma → Desktop Pictures/Sonoma.heic, light/dark by appearance), else on frame 0.
+                let still = systemPictures.appendingPathComponent(folder + ".heic")
+                if fm.fileExists(atPath: still.path) { return .file(still, dark: dark) }
                 let movs = files.filter { $0.hasSuffix(".mov") && !$0.contains("Portrait") }
                 if let mov = movs.first(where: { $0.contains(dark ? "Dark" : "Light") }) ?? movs.first {
                     return .file(dir.appendingPathComponent(mov), dark: dark)
