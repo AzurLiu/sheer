@@ -99,6 +99,12 @@ final class WallpaperProvider {
         })
     }
 
+    /// Captures come back as untagged device RGB, which drawing treats as sRGB and converts — shifting
+    /// the colours away from the desktop. They are the display's own values: tag them so.
+    static func onDisplay(_ img: CGImage, _ screen: NSScreen) -> CGImage {
+        screen.colorSpace?.cgColorSpace.flatMap { img.copy(colorSpace: $0) } ?? img
+    }
+
     static func mirrorWindow(for screen: NSScreen) async throws -> SCWindow? { try await wallpaperWindow(for: screen) }
     static func mirrorConfig(_ win: SCWindow, barHeight: CGFloat, scale: CGFloat) -> SCStreamConfiguration {
         stripConfig(win, barHeight: barHeight, scale: scale)
@@ -120,9 +126,10 @@ final class WallpaperProvider {
             var image: CGImage?
             do {
                 if let win = try await Self.wallpaperWindow(for: screen) {
-                    image = try await SCScreenshotManager.captureImage(
+                    let shot = try await SCScreenshotManager.captureImage(
                         contentFilter: SCContentFilter(desktopIndependentWindow: win),
                         configuration: Self.stripConfig(win, barHeight: barHeight, scale: scale))
+                    image = Self.onDisplay(shot, screen)
                 }
             } catch {
                 NSLog("Sheer: wallpaper capture failed: \(error)")
@@ -400,12 +407,14 @@ final class LiveMirror: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "sheer.mirror")
     private let onFrame: (CGImage) -> Void
+    private var screen: NSScreen?
 
     init(onFrame: @escaping (CGImage) -> Void) { self.onFrame = onFrame }
 
     static func start(for screen: NSScreen, barHeight: CGFloat, seconds: TimeInterval,
                       onFrame: @escaping (CGImage) -> Void) -> LiveMirror {
         let m = LiveMirror(onFrame: onFrame)
+        m.screen = screen
         let scale = screen.backingScaleFactor
         Task {
             guard let win = try? await WallpaperProvider.mirrorWindow(for: screen) else { return }
@@ -435,6 +444,9 @@ final class LiveMirror: NSObject, SCStreamOutput {
         var img: CGImage?
         VTCreateCGImageFromCVPixelBuffer(pb, options: nil, imageOut: &img)
         guard let img else { return }
-        DispatchQueue.main.async { [weak self] in self?.onFrame(img) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.onFrame(self.screen.map { WallpaperProvider.onDisplay(img, $0) } ?? img)
+        }
     }
 }
