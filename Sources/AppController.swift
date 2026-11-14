@@ -486,8 +486,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Mission Control
     //
-    // Mission Control slides the menu bar up out of the way for its Spaces strip, and back down on exit.
-    // The overlay does the same, in step, so the system bar never shows. Entry: the Dock's
+    // Mission Control replaces the menu bar with its Spaces strip, sliding it back down on exit.
+    // The overlay turns to frosted glass and fades into the strip, then slides back with the bar. Entry: the Dock's
     // AXExposeShowAllWindows notification (or, as a fallback, its full-screen layer-18 window in the
     // window scan). Exit: the Dock's "Mission Control" AX group disappears as the exit animation starts
     // (its window lingers until the end), so it's watched at 20 Hz while Mission Control is up.
@@ -534,6 +534,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func enterMissionControl() {
+        #if SHEER_DEBUG
+        Debug.append(String(format: "%.3f enterMC shows=%d\n", Date().timeIntervalSince1970, dockShowsMissionControl() ? 1 : 0), "vis.txt")
+        #endif
         guard !missionControl, dockShowsMissionControl() else { return }
         missionControl = true
         updateVisibility()
@@ -652,7 +655,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Mid-switch the system menu bars slide sideways, so none sits on this display: keep the
             // overlay as it is rather than popping it out and back in.
             if missionControl {
-                if w.isVisible { w.slideOut() }
+                if w.isVisible { w.dissolveIntoMissionControl() }
                 continue
             }
             let bar = menuBar(for: id, in: bars)
