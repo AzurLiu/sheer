@@ -146,19 +146,15 @@ final class WallpaperProvider {
         if content["Shuffle"] is [String: Any] { return .needsCapture("shuffle") }
         if provider == "default" { return .systemDefault }
 
-        // Configuration.style. Dynamic (multi-image) wallpapers: 1 = Dynamic (follows the sun; confirmed:
-        // the desktop changes frame through the afternoon), 2 = light, 3 = dark, otherwise automatic
-        // (follows the appearance). Other wallpapers: 1 = light, 2 = dark, otherwise automatic.
+        // Configuration.style. Dynamic (multi-image) wallpapers follow the sun for 0 and 1 (both confirmed
+        // in light mode: frame 4 at 4° with style 1, frame 2 at -11° with style 0), 2 = light, 3 = dark.
+        // Other wallpapers: 1 = light, 2 = dark, otherwise automatic (follows the appearance).
         var dark = systemDark, solar = false
-        if let cfg = choice["Configuration"] as? Data,
-           let c = try? PropertyListSerialization.propertyList(from: cfg, format: nil) as? [String: Any],
-           let style = c["style"] as? Int {
-            if provider == "com.apple.wallpaper.choice.dynamic" {
-                if style == 1 { solar = true } else if style == 2 { dark = false } else if style == 3 { dark = true }
-            } else {
-                if style == 1 { dark = false } else if style == 2 { dark = true }
-            }
-        }
+        let style = (choice["Configuration"] as? Data)
+            .flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any] }?["style"] as? Int
+        if provider == "com.apple.wallpaper.choice.dynamic" {
+            if style == 2 { dark = false } else if style == 3 { dark = true } else { solar = true }
+        } else if style == 1 { dark = false } else if style == 2 { dark = true }
 
         // Picture wallpapers list their file.
         if let first = (choice["Files"] as? [Any])?.first {
