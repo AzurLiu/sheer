@@ -18,7 +18,7 @@ Sheer removes the frosted background of the macOS 15 menu bar so your wallpaper 
 - **English, 简体中文, 繁體中文.** The menu follows your system language.
 - **Native-looking.** Menu titles, the Apple logo and the selection highlight are drawn at the exact size and position of the real menu bar (measured pixel-by-pixel against macOS 15). Clicks go straight to the real menu bar, so everything works as usual.
 - **Follows your wallpaper.** Changes are picked up automatically, with a soft crossfade. Still images, dynamic wallpapers and Apple's video wallpapers are read from their files — no screen recording.
-- **Stays out of the way.** No settings to tweak. Full-screen apps, auto-hiding menu bars and status items are left untouched. Typical usage is ~0.2% CPU and ~30 MB of memory.
+- **Stays out of the way.** No settings to tweak. Full-screen apps, auto-hiding menu bars and status items are left untouched. Typical usage is under 0.5% CPU and 40–70 MB of memory.
 
 ## Requirements
 
@@ -106,7 +106,7 @@ Sheer 让 **macOS 15 Sequoia** 的菜单栏变成 macOS 26/27 那样的透明效
 
 - **和原生一致**：菜单文字、苹果标志、选中高亮的大小和位置都与 macOS 15 原生菜单栏逐像素对齐；点击直接穿透到真实菜单栏，用法完全不变。
 - **自动跟随壁纸**：换壁纸后自动更新并淡入淡出。普通图片、动态壁纸和系统视频壁纸都直接读取文件，不需要截屏。
-- **零设置**：没有需要调节的选项。全屏应用、自动隐藏菜单栏、右侧状态栏图标都不受影响。通常占用约 0.2% CPU、30 MB 内存。
+- **零设置**：没有需要调节的选项。全屏应用、自动隐藏菜单栏、右侧状态栏图标都不受影响。通常占用不到 0.5% CPU、40–70 MB 内存。
 
 ### 安装
 
