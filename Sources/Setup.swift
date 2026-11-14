@@ -1,5 +1,6 @@
 // Permissions window. Lists what Sheer needs — Accessibility always, Screen Recording for wallpapers
-// that have no file to read — with a button for each, and closes itself once nothing is missing.
+// that have no file to read, Location for Dynamic wallpapers the desktop times by the Mac's position —
+// with a button for each, and closes itself once nothing is missing.
 
 import AppKit
 import ApplicationServices
@@ -11,11 +12,16 @@ final class SetupWindowController: NSWindowController {
     var onGranted: (() -> Void)?
     /// Whether the current wallpaper can only be read from the screen.
     var needsScreenRecording: () -> Bool = { false }
+    /// Whether the current wallpaper follows the sun as seen from the Mac's real position.
+    var usesLocation: () -> Bool = { false }
 
     private let axTitle = NSTextField(labelWithString: "")
     private let axButton = NSButton(title: L("setup.accessibility.button"), target: nil, action: nil)
     private let recTitle = NSTextField(labelWithString: "")
     private let recButton = NSButton(title: L("setup.recording.button"), target: nil, action: nil)
+    private let locTitle = NSTextField(labelWithString: "")
+    private let locButton = NSButton(title: L("setup.location.button"), target: nil, action: nil)
+    private var locSection = NSStackView()
 
     convenience init() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
@@ -33,17 +39,22 @@ final class SetupWindowController: NSWindowController {
         }
         let intro = NSTextField(wrappingLabelWithString: L("setup.intro"))
         intro.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        for t in [axTitle, recTitle] { t.font = .boldSystemFont(ofSize: NSFont.systemFontSize) }
+        for t in [axTitle, recTitle, locTitle] { t.font = .boldSystemFont(ofSize: NSFont.systemFontSize) }
+        locButton.target = self; locButton.action = #selector(allowLocation)
+        func section(_ views: [NSView]) -> NSStackView {
+            let s = NSStackView(views: views)
+            s.orientation = .vertical; s.alignment = .leading; s.spacing = 8
+            return s
+        }
+        locSection = section([locTitle, body("setup.location.body"), locButton])
         axButton.target = self; axButton.action = #selector(openAccessibility)
         recButton.target = self; recButton.action = #selector(openScreenRecording)
 
-        let stack = NSStackView(views: [intro, axTitle, body("setup.accessibility.body"), axButton,
-                                        recTitle, body("setup.recording.body"), recButton])
+        let stack = NSStackView(views: [intro, section([axTitle, body("setup.accessibility.body"), axButton]),
+                                        section([recTitle, body("setup.recording.body"), recButton]), locSection])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
-        stack.setCustomSpacing(18, after: intro)
-        stack.setCustomSpacing(20, after: axButton)
+        stack.spacing = 20
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
@@ -72,10 +83,17 @@ final class SetupWindowController: NSWindowController {
         if trusted && !wasTrusted { onGranted?() }
         wasTrusted = trusted
         refresh()
-        if trusted && (recording || !needsScreenRecording()) {
+        if trusted && (recording || !needsScreenRecording()) && !(locationRelevant && Location.shared.isUndetermined) {
             timer?.invalidate()
             window?.close()
         }
+    }
+
+    private var locationRelevant: Bool {
+        #if SHEER_DEBUG
+        if UserDefaults.standard.bool(forKey: "previewSetup") { return true }
+        #endif
+        return usesLocation()
     }
 
     private var granted: (accessibility: Bool, recording: Bool) {
@@ -95,12 +113,23 @@ final class SetupWindowController: NSWindowController {
         recTitle.stringValue = recording ? "✓ " + L("setup.recording.title.granted") : L(key)
         recButton.isHidden = recording
         recButton.keyEquivalent = trusted && !recording ? "\r" : ""
+        // The location row only exists for wallpapers it matters to.
+        let located = Location.shared.isAuthorized
+        locSection.isHidden = !locationRelevant
+        locTitle.stringValue = located ? "✓ " + L("setup.location.title.granted") : L("setup.location.title.needed")
+        locButton.isHidden = located
     }
 
     @objc private func openAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(opts)
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+
+    /// The system prompts once; after a refusal only its Settings pane can change the answer.
+    @objc private func allowLocation() {
+        if Location.shared.isUndetermined { Location.shared.request() }
+        else { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")!) }
     }
 
     @objc private func openScreenRecording() {

@@ -7,6 +7,10 @@
 "setup.recording.title.granted" = "屏幕录制";
 "setup.recording.body" = "Sequoia、Macintosh、航拍等实时壁纸没有图片文件，Sheer 只能从屏幕上读取壁纸。它只读取壁纸本身，不保存、不上传任何内容。没有这项权限时，用这类壁纸会显示系统原本的菜单栏。打开开关后，系统可能会要求退出并重新打开 Sheer。";
 "setup.recording.button" = "打开屏幕录制设置";
+"setup.location.title.needed" = "定位（当前的动态壁纸用得上）";
+"setup.location.title.granted" = "定位";
+"setup.location.body" = "你的壁纸会随太阳变化，系统是按这台 Mac 的位置来算时间的。Sheer 用同一个位置，菜单栏才能和桌面同一时刻换图；不允许的话，Sheer 按时区估算，可能相差几分钟。位置只留在这台 Mac 上。";
+"setup.location.button" = "允许使用定位";
 
 "menu.unsupported" = "已暂停：暂时无法显示在菜单栏之上（会自动重试）";
 "menu.update-available" = "有新版本：%@…";

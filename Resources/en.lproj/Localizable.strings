@@ -7,6 +7,10 @@
 "setup.recording.title.granted" = "Screen Recording";
 "setup.recording.body" = "Live wallpapers such as Sequoia, Macintosh and the aerials have no picture file, so Sheer has to read the wallpaper from the screen. It only looks at the wallpaper, and nothing is saved or sent anywhere. Until it's allowed, Sheer shows the normal menu bar with these wallpapers. macOS may ask to quit and reopen Sheer afterwards.";
 "setup.recording.button" = "Open Screen Recording Settings";
+"setup.location.title.needed" = "Location (for your Dynamic wallpaper)";
+"setup.location.title.granted" = "Location";
+"setup.location.body" = "Your wallpaper changes with the sun, and macOS times it by where this Mac is. With the same position, Sheer changes the menu bar at the same moment; without it, Sheer estimates from your time zone and can be a few minutes off. The position stays on this Mac.";
+"setup.location.button" = "Allow Location";
 
 "menu.unsupported" = "Paused: can't draw above the menu bar right now (retrying automatically)";
 "menu.update-available" = "Update Available: %@…";

@@ -34,6 +34,10 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT License · Sheer contributors</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Sheer uses this Mac's position only to change a sun-following wallpaper in the menu bar at the same moment as the desktop. It stays on this Mac.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Sheer uses this Mac's position only to change a sun-following wallpaper in the menu bar at the same moment as the desktop. It stays on this Mac.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

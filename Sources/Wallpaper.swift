@@ -337,18 +337,22 @@ enum Solar {
     }
 
     /// Where the desktop places the sun's observer. Allowed to use Location Services (the "Setting
-    /// time zone" system service), it takes the Mac's real position, which Sheer doesn't ask for: the
-    /// time zone's city stands in. Otherwise the desktop itself falls back to a point on the equator
-    /// at the time zone's meridian (standard offset × Earth's rotation rate), reproduced exactly here.
+    /// time zone" system service), it takes the Mac's real position: Sheer uses the same once it has
+    /// been allowed to (see Location), and until then the time zone's city stands in. Otherwise the
+    /// desktop itself falls back to a point on the equator at the time zone's meridian (standard
+    /// offset × Earth's rotation rate), reproduced exactly here.
     static var location: (lat: Double, lon: Double) {
-        if desktopUsesRealLocation, let city = zoneCity { return city }
+        if desktopUsesRealLocation, let place = Location.shared.coordinate ?? zoneCity { return place }
         let zone = TimeZone.current
         let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()
         return (0, standardOffset * 7.292115e-5 * 180 / .pi)
     }
 
     /// The wallpaper extensions locate the Mac on behalf of TimeZone.bundle.
-    private static var desktopUsesRealLocation: Bool {
+    static var desktopUsesRealLocation: Bool {
+        #if SHEER_DEBUG
+        if UserDefaults.standard.bool(forKey: "pretendDesktopLocation") { return true }   // to try the location flow
+        #endif
         if let checked, Date().timeIntervalSince(checked.at) < 60 { return checked.real }
         var real = false
         let sel = NSSelectorFromString("authorizationStatusForBundlePath:")

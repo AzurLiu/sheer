@@ -64,6 +64,8 @@ An app you build yourself isn't quarantined, so Gatekeeper won't block it.
 | **Accessibility** | Read the current app's menu titles and their positions so they can be redrawn. | Always (required) |
 | **Screen Recording** | See the wallpaper when it has no file to read: live wallpapers (e.g. *Sequoia*, *Macintosh*, Aerials), shuffling wallpapers, or different wallpapers per display or Space. Sheer takes a snapshot when the wallpaper changes, plus a few seconds of live capture while the screen unlocks. | Only for those wallpapers |
 
+| **Location** | Change a Dynamic (sun-following) wallpaper at the same moment as the desktop, when macOS times it by where the Mac is. Coarse position, kept on the Mac. | Optional, and only offered then |
+
 Without Screen Recording, Sheer shows the normal menu bar for those wallpapers and opens its permissions window to say so. The capture is of the wallpaper only, and nothing is saved.
 
 Sheer collects nothing. Its only network request is a once-a-day check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed automatically.
@@ -85,7 +87,7 @@ Placing the window between those two levels uses a private SkyLight call. If a m
 - Tested on a MacBook with a notch (37 pt menu bar). Metrics for 24 pt menu bars and multi-display setups are derived, not yet verified — reports welcome.
 - Apps that show icons instead of text in their menu titles fall back to the normal menu bar while they're frontmost.
 - The light-mode selection highlight colour is an estimate.
-- Dynamic wallpapers change frame at the same moment as the desktop when macOS places the sun by time zone. If *Setting time zone* is allowed to use Location Services, the desktop uses your precise location instead; Sheer doesn't ask for it and estimates from the time zone's city, so frames may change a few minutes apart.
+- Dynamic wallpapers change frame at the same moment as the desktop. If *Setting time zone* is allowed to use Location Services, the desktop times them by where the Mac is, and Sheer offers to use the same position; decline, and it estimates from the time zone's city, so frames may change a few minutes apart.
 
 ## Uninstall
 
@@ -140,6 +142,7 @@ Releases are built by GitHub Actions when a `v*` tag is pushed.
 ### 权限
 
 - **辅助功能（必需）**：读取当前应用的菜单文字和位置。
+- **定位（可选，仅在用得上时才会问）**：系统按这台 Mac 的位置给动态壁纸计时的时候，Sheer 用同一个位置，菜单栏才能和桌面同一时刻换图。只取大致位置，只留在本机。
 - **屏幕录制（仅特殊壁纸）**：只有 Sequoia、Macintosh、航拍等实时渲染壁纸、随机轮换壁纸、或每个屏幕 / 空间用不同壁纸时才需要：换壁纸时截取一次，解锁时实时同步几秒。没有这项权限时，用这类壁纸会显示系统原本的菜单栏，Sheer 会弹出授权窗口说明原因。只读取壁纸本身，不保存任何内容。
 
 Sheer 不收集任何数据。唯一的联网是每天一次向 GitHub 查询最新版本号；有新版本时，Sheer 菜单里会出现「有新版本」，不会自动下载或安装。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
@@ -148,4 +151,4 @@ Sheer 不收集任何数据。唯一的联网是每天一次向 GitHub 查询最
 
 - 只在刘海屏 MacBook（37pt 菜单栏）上实测过；普通 24pt 菜单栏和多显示器的效果是推算的。
 - 菜单标题是图标而不是文字的应用，在前台时会退回系统原生菜单栏。
-- 动态壁纸：系统按时区推算太阳位置时，换帧时刻与桌面完全一致。如果「设置时区」被允许使用定位服务，桌面会改用精确位置；Sheer 不申请定位权限，只能按时区所在城市估算，换帧可能相差几分钟。
+- 动态壁纸与桌面同一时刻换帧。如果「设置时区」被允许使用定位服务，桌面会按这台 Mac 的位置计时，Sheer 会询问能否使用同一位置；不允许的话，它按时区所在城市估算，换帧可能相差几分钟。

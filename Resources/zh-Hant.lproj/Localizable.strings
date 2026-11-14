@@ -7,6 +7,10 @@
 "setup.recording.title.granted" = "螢幕錄製";
 "setup.recording.body" = "Sequoia、Macintosh、空拍等即時桌面背景沒有圖片檔，Sheer 只能從螢幕上讀取桌面背景。它只讀取桌面背景本身，不儲存、不上傳任何內容。沒有這項權限時，使用這類桌面背景會顯示系統原本的選單列。打開開關後，系統可能會要求結束並重新打開 Sheer。";
 "setup.recording.button" = "打開螢幕錄製設定";
+"setup.location.title.needed" = "定位（目前的動態桌面背景用得上）";
+"setup.location.title.granted" = "定位";
+"setup.location.body" = "你的桌面背景會隨太陽變化，系統是依這台 Mac 的位置來計算時間的。Sheer 使用同一個位置，選單列才能和桌面同一時刻換圖；不允許的話，Sheer 依時區估算，可能相差幾分鐘。位置只留在這台 Mac 上。";
+"setup.location.button" = "允許使用定位";
 
 "menu.unsupported" = "已暫停：暫時無法顯示在選單列之上（會自動重試）";
 "menu.update-available" = "有新版本：%@…";

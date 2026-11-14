@@ -80,6 +80,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updates.onChange = { [weak self] in self?.updateStatusIcon(); self?.announceUpdate() }
         updates.start()
         if !AXIsProcessTrusted() { showSetup() }
+        Location.shared.onChange = { [weak self] in self?.reloadWallpapers() }
+        Location.shared.start()
 
         rebuildOverlays()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
@@ -103,6 +105,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if setup == nil {
             setup = SetupWindowController()
             setup?.needsScreenRecording = { [weak self] in self?.wallpapers.needsCapture ?? false }
+            setup?.usesLocation = { [weak self] in self?.sunNeedsLocation ?? false }
             setup?.onGranted = { [weak self] in
                 self?.trusted = true
                 self?.reader.attach(to: NSWorkspace.shared.menuBarOwningApplication)
@@ -450,8 +453,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             askedForRecording = false
         }
+        // Same for a Dynamic wallpaper the desktop times by the Mac's real position: offer once to
+        // let Sheer use it too (after a refusal the system won't ask again, and neither does Sheer).
+        if sunNeedsLocation && Location.shared.isUndetermined {
+            if !askedForLocation { askedForLocation = true; showSetup() }
+        } else {
+            askedForLocation = false
+        }
     }
     private var askedForRecording = false
+    private var askedForLocation = false
+    /// A sun-following wallpaper, on a Mac whose desktop places the sun by Location Services.
+    private var sunNeedsLocation: Bool { wallpapers.followsSun && Solar.desktopUsesRealLocation }
 
     private func applyTitles() {
         let items = reader.items
