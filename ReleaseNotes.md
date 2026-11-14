@@ -1,5 +1,5 @@
-A new version tells you once, with what changed and a Download button, instead of only a dot on the menu bar icon.
+Dynamic wallpapers now change in the menu bar at the same moment as the desktop when macOS times them by where your Mac is: Sheer offers to use the same position (optional, kept on your Mac).
 ---
-发现新版本时会弹一次说明，写明改了什么并带下载按钮，不再只在菜单栏图标上加一个小圆点。
+系统按 Mac 的位置给动态壁纸计时的时候，菜单栏现在能和桌面同一时刻换图：Sheer 会询问能否使用同一位置（可选，位置只留在本机）。
 ---
 Unzip, move Sheer.app to Applications, then open it. The first time, allow it under System Settings → Privacy & Security → Open Anyway.
