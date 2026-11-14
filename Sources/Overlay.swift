@@ -7,7 +7,6 @@
 
 import AppKit
 import ColorSync
-import CoreImage
 
 // MARK: - Legibility gradient (like macOS 26/27: a faint gradient at the top of the wallpaper)
 
@@ -128,28 +127,6 @@ final class BarView: NSView {
     }
     /// Frames of a moving wallpaper are arriving: show each as is.
     var live = false
-
-    /// Draw only frosted glass — no titles, gradient or shadows. Switched at once: a crossfade would
-    /// leave the titles ghosting over the glass.
-    var frosted = false { didSet { if frosted != oldValue { needsDisplay = true; displayIfNeeded() } } }
-
-    /// The wallpaper strip blurred and saturated, approximating Mission Control's Spaces bar.
-    private var frostedImage: CGImage? {
-        guard let wallpaper else { return nil }
-        if let f = frostCache, f.source === wallpaper { return f.image }
-        let scale = window?.backingScaleFactor ?? 2
-        let input = CIImage(cgImage: wallpaper)
-        let out = input.clampedToExtent()
-            .applyingGaussianBlur(sigma: 14 * scale)
-            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 1.25])
-            .cropped(to: input.extent)
-        let img = Self.ciContext.createCGImage(out, from: input.extent, format: .RGBA8,
-                                               colorSpace: wallpaper.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!)
-        frostCache = (wallpaper, img)
-        return img
-    }
-    private var frostCache: (source: CGImage, image: CGImage?)?
-    private static let ciContext = CIContext(options: [.cacheIntermediates: false])
     var titles: [MenuTitle] = [] { didSet { if titles != oldValue { needsDisplay = true } } }
     /// Offset from global menu-title coordinates to this view's coordinates.
     var origin: CGPoint = .zero { didSet { if origin != oldValue { needsDisplay = true } } }
@@ -225,18 +202,6 @@ final class BarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        // Entering Mission Control: an empty frosted strip, like the Spaces bar that takes over.
-        if frosted, let glass = frostedImage {
-            ctx.saveGState()
-            ctx.translateBy(x: 0, y: bounds.height)
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(glass, in: CGRect(origin: .zero, size: bounds.size))
-            ctx.restoreGState()
-            NSColor.white.withAlphaComponent(0.28).setFill()
-            bounds.fill()
-            return
-        }
 
         // 1. Wallpaper
         if let wallpaper {
@@ -469,25 +434,20 @@ final class OverlayWindow: NSPanel {
 
     private(set) var sliding = false
 
-    /// Mission Control: the titles vanish at once (covering the system bar, whose titles would otherwise
-    /// linger as it fades), the bar turns to frosted glass like the Spaces bar, then fades into it.
-    func dissolveIntoMissionControl() {
+    func slideOut() {
         guard isVisible, !sliding else { return }
         sliding = true
         scrim.orderOut(nil)
-        bar.frosted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSAnimationContext.runAnimationGroup({ c in
-                c.duration = 0.22
-                c.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                self.animator().alphaValue = 0
-            }, completionHandler: {
-                self.orderOut(nil)
-                self.alphaValue = 1
-                self.bar.frosted = false
-                self.sliding = false
-            })
-        }
+        let f = frame
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 0.25
+            c.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            animator().setFrame(f.offsetBy(dx: 0, dy: f.height), display: true)
+        }, completionHandler: {
+            self.orderOut(nil)
+            self.setFrame(f, display: false)
+            self.sliding = false
+        })
     }
 
     func slideIn() {
