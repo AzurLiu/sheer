@@ -348,19 +348,23 @@ enum Solar {
         return (0, standardOffset * 7.292115e-5 * 180 / .pi)
     }
 
-    /// The wallpaper extensions locate the Mac on behalf of TimeZone.bundle.
+    /// The wallpaper extensions locate the Mac on behalf of TimeZone.bundle, the "Setting time zone"
+    /// system service: whether that is switched on is in locationd's client list. (CoreLocation's own
+    /// status calls answer "not determined" for it whatever the switch says. Seen on a Mac where
+    /// turning the service on moved the desktop to the real position's frame within the second.)
     static var desktopUsesRealLocation: Bool {
         #if SHEER_DEBUG
         if UserDefaults.standard.bool(forKey: "pretendDesktopLocation") { return true }   // to try the location flow
         #endif
         if let checked, Date().timeIntervalSince(checked.at) < 60 { return checked.real }
         var real = false
-        let sel = NSSelectorFromString("authorizationStatusForBundlePath:")
-        if CLLocationManager.locationServicesEnabled(), let method = class_getClassMethod(CLLocationManager.self, sel) {
-            typealias Fn = @convention(c) (AnyClass, Selector, NSString) -> Int32
-            let status = unsafeBitCast(method_getImplementation(method), to: Fn.self)(
-                CLLocationManager.self, sel, "/System/Library/LocationBundles/TimeZone.bundle")
-            real = status == CLAuthorizationStatus.authorizedAlways.rawValue || status == 4   // 4: when in use
+        if CLLocationManager.locationServicesEnabled(),
+           let data = try? Data(contentsOf: URL(fileURLWithPath: "/var/db/locationd/clients.plist")),
+           let clients = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+            real = clients.values.contains {
+                guard let c = $0 as? [String: Any], (c["BundlePath"] as? String) == "/System/Library/LocationBundles/TimeZone.bundle" else { return false }
+                return (c["Authorized"] as? NSNumber)?.boolValue == true
+            }
         }
         checked = (Date(), real)
         return real
