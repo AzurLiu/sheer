@@ -1,5 +1,12 @@
-"setup.message" = "Sheer 需要「輔助使用」權限來讀取選單文字，只需授權一次。\n點下方的按鈕，在列表中打開 Sheer 的開關，完成後此視窗會自動關閉。";
-"setup.button" = "打開輔助使用設定";
+"setup.intro" = "Sheer 需要你的授權才能繪製選單列。每項只需授權一次，全部就緒後此視窗會自動關閉。";
+"setup.accessibility.title" = "輔助使用（必要）";
+"setup.accessibility.body" = "用來讀取選單文字和它們的位置。點下方的按鈕，在列表中打開 Sheer 的開關。";
+"setup.accessibility.button" = "打開輔助使用設定";
+"setup.recording.title.needed" = "螢幕錄製（目前的桌面背景需要）";
+"setup.recording.title.optional" = "螢幕錄製（僅部分桌面背景需要）";
+"setup.recording.title.granted" = "螢幕錄製";
+"setup.recording.body" = "Sequoia、Macintosh、空拍等即時桌面背景沒有圖片檔，Sheer 只能從螢幕上讀取桌面背景。它只讀取桌面背景本身，不儲存、不上傳任何內容。沒有這項權限時，使用這類桌面背景會顯示系統原本的選單列。打開開關後，系統可能會要求結束並重新打開 Sheer。";
+"setup.recording.button" = "打開螢幕錄製設定";
 
 "menu.unsupported" = "已暫停：暫時無法顯示在選單列之上（會自動重試）";
 "menu.update-available" = "有新版本：%@…";

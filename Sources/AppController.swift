@@ -71,6 +71,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(testSwitch(_:)), name: NSNotification.Name("sheer.test-switch"), object: nil)
         dnc.addObserver(self, selector: #selector(testLevel(_:)), name: NSNotification.Name("sheer.test-level"), object: nil)
         dnc.addObserver(self, selector: #selector(testMirror), name: NSNotification.Name("sheer.test-mirror"), object: nil)
+        dnc.addObserver(self, selector: #selector(openSetup), name: NSNotification.Name("sheer.test-setup"), object: nil)
         #endif
         watchWallpaperStore()
         observeDock()
@@ -101,6 +102,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showSetup() {
         if setup == nil {
             setup = SetupWindowController()
+            setup?.needsScreenRecording = { [weak self] in self?.wallpapers.needsCapture ?? false }
             setup?.onGranted = { [weak self] in
                 self?.trusted = true
                 self?.reader.attach(to: NSWorkspace.shared.menuBarOwningApplication)
@@ -413,13 +415,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.updateVisibility()
             }
         }
-        // Live-rendered wallpapers need Screen Recording: ask once (the system only prompts once).
-        if wallpapers.needsCapture && !CGPreflightScreenCaptureAccess()
-            && !UserDefaults.standard.bool(forKey: "askedScreenRecording") {
-            UserDefaults.standard.set(true, forKey: "askedScreenRecording")
-            CGRequestScreenCaptureAccess()
+        // Live-rendered wallpapers need Screen Recording. Without it Sheer steps aside for the system
+        // menu bar, which looks broken unless it says why: show the permissions window, once each time
+        // such a wallpaper comes up (at launch, or when the wallpaper changes to one).
+        if wallpapers.needsCapture && !CGPreflightScreenCaptureAccess() {
+            if !askedForRecording { askedForRecording = true; showSetup() }
+        } else {
+            askedForRecording = false
         }
     }
+    private var askedForRecording = false
 
     private func applyTitles() {
         let items = reader.items

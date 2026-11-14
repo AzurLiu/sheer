@@ -1,5 +1,12 @@
-"setup.message" = "Sheer needs Accessibility access to read the menu titles. You only need to grant it once.\nClick the button below and turn on Sheer in the list. This window closes by itself when you're done.";
-"setup.button" = "Open Accessibility Settings";
+"setup.intro" = "Sheer needs your permission before it can draw the menu bar. You grant each one once, and this window closes by itself when nothing is missing.";
+"setup.accessibility.title" = "Accessibility (required)";
+"setup.accessibility.body" = "To read the menu titles and where they are. Click the button, then turn on Sheer in the list.";
+"setup.accessibility.button" = "Open Accessibility Settings";
+"setup.recording.title.needed" = "Screen Recording (needed for your wallpaper)";
+"setup.recording.title.optional" = "Screen Recording (only for some wallpapers)";
+"setup.recording.title.granted" = "Screen Recording";
+"setup.recording.body" = "Live wallpapers such as Sequoia, Macintosh and the aerials have no picture file, so Sheer has to read the wallpaper from the screen. It only looks at the wallpaper, and nothing is saved or sent anywhere. Until it's allowed, Sheer shows the normal menu bar with these wallpapers. macOS may ask to quit and reopen Sheer afterwards.";
+"setup.recording.button" = "Open Screen Recording Settings";
 
 "menu.unsupported" = "Paused: can't draw above the menu bar right now (retrying automatically)";
 "menu.update-available" = "Update Available: %@…";

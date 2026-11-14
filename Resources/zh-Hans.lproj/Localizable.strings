@@ -1,5 +1,12 @@
-"setup.message" = "Sheer 需要「辅助功能」权限来读取菜单文字，只需授权一次。\n点下面的按钮，在列表里打开 Sheer 的开关，完成后本窗口会自动关闭。";
-"setup.button" = "打开辅助功能设置";
+"setup.intro" = "Sheer 需要你的授权才能绘制菜单栏。每项只需授权一次，全部就绪后本窗口会自动关闭。";
+"setup.accessibility.title" = "辅助功能（必需）";
+"setup.accessibility.body" = "用来读取菜单文字和它们的位置。点下面的按钮，在列表里打开 Sheer 的开关。";
+"setup.accessibility.button" = "打开辅助功能设置";
+"setup.recording.title.needed" = "屏幕录制（当前壁纸需要）";
+"setup.recording.title.optional" = "屏幕录制（仅部分壁纸需要）";
+"setup.recording.title.granted" = "屏幕录制";
+"setup.recording.body" = "Sequoia、Macintosh、航拍等实时壁纸没有图片文件，Sheer 只能从屏幕上读取壁纸。它只读取壁纸本身，不保存、不上传任何内容。没有这项权限时，用这类壁纸会显示系统原本的菜单栏。打开开关后，系统可能会要求退出并重新打开 Sheer。";
+"setup.recording.button" = "打开屏幕录制设置";
 
 "menu.unsupported" = "已暂停：暂时无法显示在菜单栏之上（会自动重试）";
 "menu.update-available" = "有新版本：%@…";
