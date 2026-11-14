@@ -284,6 +284,9 @@ final class BarView: NSView {
             }
 
             ctx.saveGState()
+            // Light titles carry a soft drop shadow, like macOS 15's own (measured: ~15% darker just
+            // below the glyphs, fading out by ~5 pt), so they hold up over pale patches of wallpaper.
+            if dark { ctx.setShadow(offset: CGSize(width: 0, height: -1), blur: 4, color: NSColor.black.withAlphaComponent(0.4 * alpha).cgColor) }
             ctx.textMatrix = .identity
             ctx.translateBy(x: x, y: baseline)
             ctx.scaleBy(x: 1, y: -1)
