@@ -131,7 +131,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         a.informativeText = [updates.notes, L("alert.update.body")].compactMap { $0 }.joined(separator: "\n\n")
         a.addButton(withTitle: L("alert.update.download"))
         a.addButton(withTitle: L("alert.update.later"))
-        if a.runModal() == .alertFirstButtonReturn { openReleases() }
+        #if SHEER_DEBUG
+        // `defaults write io.github.sheer.Sheer testUpdateButton -int 0|1` clicks that button after 2 s.
+        if let i = UserDefaults.standard.object(forKey: "testUpdateButton") as? Int, a.buttons.indices.contains(i) {
+            let t = Timer(timeInterval: 2, repeats: false) { _ in a.buttons[i].performClick(nil) }
+            RunLoop.main.add(t, forMode: .common)
+        }
+        #endif
+        let download = a.runModal() == .alertFirstButtonReturn
+        Debug.write("\(Date()) update alert for \(version): \(download ? "download" : "later")\n", "update-alert.txt")
+        if download { openReleases() }
     }
 
     private func markUnsupported() {
@@ -229,7 +238,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSetup() { showSetup() }
 
-    @objc private func openReleases() { NSWorkspace.shared.open(UpdateChecker.releasesPage) }
+    @objc private func openReleases() {
+        let opened = NSWorkspace.shared.open(UpdateChecker.releasesPage)
+        Debug.write("\(Date()) opened \(UpdateChecker.releasesPage): \(opened)\n", "update-open.txt")
+    }
 
     /// A small dot on the status icon while an update is available.
     private func updateStatusIcon() {
