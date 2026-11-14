@@ -18,38 +18,67 @@ enum Scrim {
     static let base: CGFloat = 0.12
     static let maxTop: CGFloat = 0.38
 
-    /// Ease-out: a0 at the top, decaying as (1-t)^2.2 to zero — no visible edge.
-    static func gradient(top a0: CGFloat, dark: Bool) -> NSGradient? {
-        let c = dark ? NSColor.black : NSColor.white
-        let n = 16
-        var colors: [NSColor] = []
-        var locs: [CGFloat] = []
-        for i in 0...n {
-            let t = CGFloat(i) / CGFloat(n)
-            colors.append(c.withAlphaComponent(a0 * pow(1 - t, 2.2)))
-            locs.append(t)
-        }
-        return locs.withUnsafeBufferPointer { NSGradient(colors: colors, atLocations: $0.baseAddress, colorSpace: .sRGB) }
-    }
+    /// Vertical falloff: full strength at the top of the screen, easing out as (1-t)^2.2 to zero.
+    static func falloff(_ t: CGFloat) -> CGFloat { pow(max(0, 1 - t), 2.2) }
 
     /// Attenuation at the vertical centre of the menu titles.
-    static var textFactor: CGFloat { pow(1 - 0.5 / spread, 2.2) }
+    static var textFactor: CGFloat { falloff(0.5 / spread) }
+
+    /// Backing opacity a text colour needs over a background of linear luminance `lum` for 4.5:1
+    /// contrast (0 = none), capped at 0.3.
+    static func alpha(lum: CGFloat, darkText: Bool) -> CGFloat {
+        let target: CGFloat = 4.5
+        let a: CGFloat
+        if darkText {
+            let need: CGFloat = target * 0.05 - 0.05            // background luminance ≥ 0.175
+            a = lum >= need ? 0 : (need - lum) / (1 - lum)
+        } else {
+            let need: CGFloat = 1.05 / target - 0.05            // background luminance ≤ ~0.183
+            a = lum <= need ? 0 : 1 - need / lum
+        }
+        return min(0.3, max(0, a))
+    }
+
+    /// The whole gradient as a small image: one column per entry of `top` (the opacity at the top of
+    /// the screen there), `rows` rows down to the gradient's end. Drawn stretched; bilinear filtering
+    /// keeps it smooth both ways.
+    static func image(top: [CGFloat], dark: Bool, rows: Int = 96) -> CGImage? {
+        let w = top.count
+        guard w > 0, let ctx = CGContext(data: nil, width: w, height: rows, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let d = ctx.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let c: CGFloat = dark ? 0 : 1
+        for y in 0..<rows {   // row 0 = top of the screen
+            let f = falloff((CGFloat(y) + 0.5) / CGFloat(rows))
+            for x in 0..<w {
+                let a = top[x] * f, i = (y * w + x) * 4
+                let v = UInt8((c * a * 255).rounded()), al = UInt8((a * 255).rounded())
+                d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = al
+            }
+        }
+        return ctx.makeImage()
+    }
 
     /// Draw in a flipped view whose top edge is `offset` points below the top of the screen.
-    static func draw(top a0: CGFloat, dark: Bool, barHeight: CGFloat, offset: CGFloat) {
-        guard a0 > 0.005 else { return }
-        gradient(top: a0, dark: dark)?.draw(from: NSPoint(x: 0, y: -offset),
-                                             to: NSPoint(x: 0, y: barHeight * spread - offset), options: [])
+    static func draw(_ img: CGImage?, width: CGFloat, barHeight: CGFloat, offset: CGFloat) {
+        guard let img, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let r = CGRect(x: 0, y: -offset, width: width, height: barHeight * spread)
+        ctx.saveGState()
+        ctx.interpolationQuality = .high
+        ctx.translateBy(x: 0, y: r.minY + r.maxY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(img, in: r)
+        ctx.restoreGState()
     }
 }
 
 final class DesktopScrimView: NSView {
-    var a0: CGFloat = 0 { didSet { if a0 != oldValue { needsDisplay = true } } }
-    var dark = false { didSet { if dark != oldValue { needsDisplay = true } } }
+    var image: CGImage? { didSet { if image !== oldValue { needsDisplay = true } } }
     var barHeight: CGFloat = 37 { didSet { if barHeight != oldValue { needsDisplay = true } } }
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        Scrim.draw(top: a0, dark: dark, barHeight: barHeight, offset: barHeight)
+        Scrim.draw(image, width: bounds.width, barHeight: barHeight, offset: barHeight)
     }
 }
 
@@ -120,8 +149,12 @@ final class BarView: NSView {
     // Luminance of the parts of the wallpaper least favourable to text (90th / 10th percentile, linear 0…1).
     private var lumBright: CGFloat = 0
     private var lumDark: CGFloat = 1
+    // Per column (left to right): the darkest and brightest luminance under the bar.
+    private var colDark: [CGFloat] = []
+    private var colBright: [CGFloat] = []
 
     private func measureWallpaper() {
+        scrimCache = nil
         guard let img = wallpaper,
               let ctx = CGContext(data: nil, width: 128, height: 4, bitsPerComponent: 8, bytesPerRow: 128 * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -134,31 +167,51 @@ final class BarView: NSView {
         for i in 0..<(128 * 4) {
             lums.append(0.2126 * lin(d[i * 4]) + 0.7152 * lin(d[i * 4 + 1]) + 0.0722 * lin(d[i * 4 + 2]))
         }
+        colDark = (0..<128).map { x in (0..<4).map { lums[$0 * 128 + x] }.min()! }
+        colBright = (0..<128).map { x in (0..<4).map { lums[$0 * 128 + x] }.max()! }
         lums.sort()
         lumBright = lums[Int(Double(lums.count) * 0.9)]
         lumDark = lums[Int(Double(lums.count) * 0.1)]
     }
 
-    /// Opacity at the top of the gradient: a faint base, deepened only when the wallpaper is too
-    /// bright/busy for the text to reach 4.5:1 contrast.
-    var scrimTop: CGFloat {
-        guard wallpaper != nil else { return 0 }
-        let need = scrimAlpha(darkText: !isDark) / Scrim.textFactor
-        return min(Scrim.maxTop, max(Scrim.base, need))
+    /// Backing opacity needed at the text for the whole bar (used to pick the text colour).
+    func scrimAlpha(darkText: Bool) -> CGFloat {
+        Scrim.alpha(lum: darkText ? lumDark : lumBright, darkText: darkText)
     }
 
-    /// Backing opacity needed at the text for a 4.5:1 contrast ratio (0 = none), capped at 0.3.
-    func scrimAlpha(darkText: Bool) -> CGFloat {
-        let target: CGFloat = 4.5
-        let a: CGFloat
-        if darkText {
-            let need: CGFloat = target * 0.05 - 0.05            // background luminance ≥ 0.175
-            a = lumDark >= need ? 0 : (need - lumDark) / (1 - lumDark)
-        } else {
-            let need: CGFloat = 1.05 / target - 0.05            // background luminance ≤ ~0.183
-            a = lumBright <= need ? 0 : 1 - need / lumBright
+    /// Opacity at the top of the gradient, column by column: a faint base everywhere, deepened only
+    /// where the wallpaper right there is too bright/dark for the text to reach 4.5:1 — so a dark patch
+    /// under a few titles doesn't wash out the rest of the bar. Widened and blurred so it has no edges.
+    private var scrimProfile: [CGFloat] {
+        guard wallpaper != nil, !colDark.isEmpty else { return [] }
+        let darkText = !isDark
+        let need = zip(colDark, colBright).map { dk, br in
+            min(Scrim.maxTop, max(Scrim.base, Scrim.alpha(lum: darkText ? dk : br, darkText: darkText) / Scrim.textFactor))
         }
-        return min(0.3, max(0, a))
+        let n = need.count
+        func window(_ v: [CGFloat], _ r: Int, _ f: ([CGFloat]) -> CGFloat) -> [CGFloat] {
+            (0..<n).map { i in f(Array(v[max(0, i - r)...min(n - 1, i + r)])) }
+        }
+        var p = window(need, 4) { $0.max()! }                                  // cover glyphs near an edge
+        for _ in 0..<2 { p = window(p, 3) { $0.reduce(0, +) / CGFloat($0.count) } } // soft transitions
+        return p
+    }
+
+    private var scrimCache: (dark: Bool, image: CGImage?, top: CGFloat)?
+
+    /// The gradient image shared by the bar and the desktop part below it.
+    var scrimImage: CGImage? { scrim.image }
+    /// Strongest opacity at the top of the gradient (0 = nothing to draw).
+    var scrimTop: CGFloat { scrim.top }
+
+    private var scrim: (image: CGImage?, top: CGFloat) {
+        let dark = isDark
+        if let c = scrimCache, c.dark == dark { return (c.image, c.top) }
+        let p = scrimProfile
+        let top = p.max() ?? 0
+        let img = top > 0.005 ? Scrim.image(top: p, dark: dark) : nil
+        scrimCache = (dark, img, top)
+        return (img, top)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -178,7 +231,7 @@ final class BarView: NSView {
         }
 
         let dark = isDark
-        Scrim.draw(top: scrimTop, dark: dark, barHeight: bounds.height, offset: 0)
+        Scrim.draw(scrimImage, width: bounds.width, barHeight: bounds.height, offset: 0)
 
         // Window shadows. On the desktop they fall on the wallpaper right below the bar; without this
         // they'd stop dead at the bar's edge and leave a line. Fitted to macOS 15 (measured against white,
@@ -465,8 +518,7 @@ final class OverlayWindow: NSPanel {
     /// Keep the below-the-bar part of the gradient in step with the part drawn in the bar.
     func syncScrim() {
         let a0 = bar.scrimTop
-        scrim.view.a0 = a0
-        scrim.view.dark = bar.isDark
+        scrim.view.image = bar.scrimImage
         scrim.view.barHeight = frame.height
         if isVisible && !sliding && a0 > 0.005 {
             if !scrim.isVisible {
