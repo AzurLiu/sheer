@@ -109,6 +109,12 @@ Quit Sheer from its menu, turn off **Launch at Login** if you enabled it, and de
 Sources are plain Swift files in `Sources/`; the app icon is drawn in code by `Icon/make_icon.swift`.
 Releases are built by GitHub Actions when a `v*` tag is pushed.
 
+Version numbers follow [semantic versioning](https://semver.org) from 1.1.0 on: the last number for a
+release that only fixes things, the middle one for new features, the first for changes that aren't
+compatible. (Releases up to 1.0.15 only ever raised the last number.) Set `CFBundleShortVersionString`
+and `CFBundleVersion` (one more each release) in `Info.plist`, write `ReleaseNotes.md` (English, then
+Chinese, then the install line, separated by `---`), then tag.
+
 ## License
 
 [MIT](LICENSE)
