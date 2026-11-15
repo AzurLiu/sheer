@@ -1,5 +1,5 @@
-Sheer now checks for updates every hour instead of once a day, so fixes reach you sooner. From 1.0.14 on, updating is one click and your permissions stay on.
+Fixed the menu bar sometimes showing a different shade of a Dynamic wallpaper than the desktop under it (for example a lighter sky than the wallpaper) on a Mac whose "Setting time zone" location service is switched off. Sheer now follows the position the desktop keeps, so the two change together.
 ---
-Sheer 现在每小时检查一次更新（以前是每天一次），修复能更快送到你手上。从 1.0.14 起，更新只要点一下，授权也会保留。
+修复了在"设置时区"定位服务关闭的 Mac 上，菜单栏有时和桌面显示动态壁纸的不同一帧（例如菜单栏的天空比壁纸更亮）的问题。Sheer 现在会沿用桌面保留的位置，两者一起变化。
 ---
 Unzip, move Sheer.app to Applications, then open it. The first time, allow it under System Settings → Privacy & Security → Open Anyway.
