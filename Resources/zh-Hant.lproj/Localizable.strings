@@ -30,6 +30,14 @@
 "alert.login-item.body" = "請先把 Sheer.app 放進「應用程式」檔案夾再試。";
 
 "alert.update.title" = "Sheer %@ 可以更新了";
-"alert.update.body" = "下載後替換「應用程式」裡的 Sheer，再依彈出的授權視窗重新打開一次開關：系統會把每個版本當成新的 App。";
+"alert.update.body" = "下載後替換「應用程式」裡的 Sheer 即可。";
 "alert.update.download" = "前往下載";
 "alert.update.later" = "稍後再說";
+"alert.update.body.auto" = "Sheer 會從 GitHub 下載新版本，確認是正版後自動替換並重新開啟，授權不受影響。";
+"alert.update.install" = "更新";
+"menu.updating" = "正在更新到 %@…";
+"alert.update-failed.title" = "Sheer 沒能自動更新";
+"alert.update-failed.body" = "%@可以改為從 GitHub 手動下載新版本。";
+"update.fail.download" = "下載沒有完成。";
+"update.fail.check" = "下載到的不是開發者簽名的 Sheer 正式版。";
+"update.fail.replace" = "Sheer 沒辦法替換所在資料夾裡的舊版本。";

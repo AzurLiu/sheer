@@ -74,6 +74,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(openSetup), name: NSNotification.Name("sheer.test-setup"), object: nil)
         dnc.addObserver(self, selector: #selector(testClick(_:)), name: NSNotification.Name("sheer.test-click"), object: nil)
         dnc.addObserver(self, selector: #selector(testFollow(_:)), name: NSNotification.Name("sheer.test-follow"), object: nil)
+        dnc.addObserver(self, selector: #selector(testUpdate), name: NSNotification.Name("sheer.test-update"), object: nil)
         #endif
         watchWallpaperStore()
         observeDock()
@@ -134,8 +135,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = String(format: L("alert.update.title"), version)
-        a.informativeText = [updates.notes, L("alert.update.body")].compactMap { $0 }.joined(separator: "\n\n")
-        a.addButton(withTitle: L("alert.update.download"))
+        let inPlace = updates.canInstall
+        a.informativeText = [updates.notes, L(inPlace ? "alert.update.body.auto" : "alert.update.body")].compactMap { $0 }.joined(separator: "\n\n")
+        a.addButton(withTitle: L(inPlace ? "alert.update.install" : "alert.update.download"))
         a.addButton(withTitle: L("alert.update.later"))
         #if SHEER_DEBUG
         // `defaults write io.github.sheer.Sheer testUpdateButton -int 0|1` clicks that button after 2 s.
@@ -146,7 +148,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         #endif
         let download = a.runModal() == .alertFirstButtonReturn
         Debug.write("\(Date()) update alert for \(version): \(download ? "download" : "later")\n", "update-alert.txt")
-        if download { openReleases() }
+        if download { installUpdate() }
+    }
+
+    /// Update in place when Sheer can (see Updater.swift), otherwise open the download page.
+    @objc private func installUpdate() {
+        guard updates.canInstall else { openReleases(); return }
+        updates.install { [weak self] result in
+            switch result {
+            case .success(let app): self?.relaunch(app)
+            case .failure(let why): self?.updateFailed(why)
+            }
+        }
+    }
+
+    /// Open the new version once this one has quit.
+    private func relaunch(_ app: URL) {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", "while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open \"$0\"", app.path]
+        try? sh.run()
+        NSApp.terminate(nil)
+    }
+
+    private func updateFailed(_ why: UpdateChecker.InstallError) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = L("alert.update-failed.title")
+        let reason: String
+        switch why {
+        case .download: reason = L("update.fail.download")
+        case .check: reason = L("update.fail.check")
+        case .replace: reason = L("update.fail.replace")
+        }
+        a.informativeText = String(format: L("alert.update-failed.body"), reason)
+        a.addButton(withTitle: L("alert.update.download"))
+        a.addButton(withTitle: L("alert.update.later"))
+        if a.runModal() == .alertFirstButtonReturn { openReleases() }
     }
 
     private func markUnsupported() {
@@ -224,7 +263,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         header.isEnabled = false
         menu.addItem(header)
         if let v = updates.available {
-            add(String(format: L("menu.update-available"), v), #selector(openReleases))
+            if updates.installing {
+                let item = NSMenuItem(title: String(format: L("menu.updating"), v), action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            } else {
+                add(String(format: L("menu.update-available"), v), #selector(installUpdate))
+            }
         }
         if unsupported {
             let note = NSMenuItem(title: L("menu.unsupported"), action: nil, keyEquivalent: "")

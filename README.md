@@ -44,6 +44,13 @@ Why it doesn't feel like an add-on:
    (Or run `xattr -dr com.apple.quarantine /Applications/Sheer.app` in Terminal.)
 4. Sheer opens a window listing the permissions it needs, each with its own button: **Accessibility** (always) and **Screen Recording** (only for live wallpapers such as *Sequoia*, the macOS 15 default). Grant what it asks for and the window closes by itself.
 
+### Updating
+
+When a new version is out, Sheer says so; click **Update** and it downloads the release from GitHub,
+checks that it's signed with Sheer's own certificate, replaces itself and reopens. Your permissions
+stay, and macOS doesn't ask to confirm opening it again. (Releases before 1.0.14 were signed ad hoc,
+so updating from those takes one last manual download and granting the permissions once more.)
+
 ### Build from source
 
 Needs only the Xcode Command Line Tools (`xcode-select --install`).
@@ -68,7 +75,7 @@ An app you build yourself isn't quarantined, so Gatekeeper won't block it.
 
 Without Screen Recording, Sheer shows the normal menu bar for those wallpapers and opens its permissions window to say so. The capture is of the wallpaper only, and nothing is saved.
 
-Sheer collects nothing. Its only network request is a once-a-day check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed automatically.
+Sheer collects nothing. Its only network request is a once-a-day check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed unless you click **Update**, and then only the release itself, from GitHub.
 
 > macOS 15 periodically asks whether apps may keep recording the screen. You'll only see this with the wallpapers listed above.
 

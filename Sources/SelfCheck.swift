@@ -27,6 +27,13 @@ extension AppController {
         }
     }
 
+    /// "sheer.test-update": check for an update now (see the "updateAPI" default) and announce it again.
+    @objc func testUpdate() {
+        guard Debug.enabled else { return }
+        UserDefaults.standard.removeObject(forKey: "announcedVersion")
+        updates.checkNow()
+    }
+
     /// "sheer.test-follow" with "0" or "1": turn undoing Stage Manager's shift off or on.
     @objc func testFollow(_ n: Notification) {
         guard Debug.enabled else { return }

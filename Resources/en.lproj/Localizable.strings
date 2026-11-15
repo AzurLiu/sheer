@@ -30,6 +30,14 @@
 "alert.login-item.body" = "Move Sheer.app to the Applications folder and try again.";
 
 "alert.update.title" = "Sheer %@ is available";
-"alert.update.body" = "Download it, replace Sheer in Applications, and turn Sheer on again in the permissions window that opens: macOS treats each version as a new app.";
+"alert.update.body" = "Download it and replace Sheer in Applications.";
 "alert.update.download" = "Download";
 "alert.update.later" = "Later";
+"alert.update.body.auto" = "Sheer downloads it from GitHub, checks that it is really Sheer, swaps it in and reopens. Its permissions stay on.";
+"alert.update.install" = "Update";
+"menu.updating" = "Updating to %@…";
+"alert.update-failed.title" = "Sheer couldn't update itself";
+"alert.update-failed.body" = "%@ You can download the new version from GitHub instead.";
+"update.fail.download" = "The download didn't finish.";
+"update.fail.check" = "The download isn't a Sheer release signed by its developer.";
+"update.fail.replace" = "Sheer couldn't replace itself in its folder.";
