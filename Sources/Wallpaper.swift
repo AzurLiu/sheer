@@ -441,6 +441,10 @@ enum Solar {
     /// offset × Earth's rotation rate), reproduced exactly here.
     static var location: (lat: Double, lon: Double) {
         if desktopUsesRealLocation, let place = Location.shared.coordinate ?? zoneCity { return place }
+        // The service is off. A desktop that once had a real position keeps it (the time zone's meridian
+        // below is only for a Mac that never had one), and Sheer only holds a position if it was given
+        // one while the service was on: use it.
+        if let kept = Location.shared.lastKnown { return kept }
         let zone = TimeZone.current
         let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()
         return (0, standardOffset * 7.292115e-5 * 180 / .pi)
