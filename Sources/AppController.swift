@@ -72,6 +72,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(testLevel(_:)), name: NSNotification.Name("sheer.test-level"), object: nil)
         dnc.addObserver(self, selector: #selector(testMirror), name: NSNotification.Name("sheer.test-mirror"), object: nil)
         dnc.addObserver(self, selector: #selector(openSetup), name: NSNotification.Name("sheer.test-setup"), object: nil)
+        dnc.addObserver(self, selector: #selector(testClick(_:)), name: NSNotification.Name("sheer.test-click"), object: nil)
+        dnc.addObserver(self, selector: #selector(testFollow(_:)), name: NSNotification.Name("sheer.test-follow"), object: nil)
         #endif
         watchWallpaperStore()
         observeDock()
@@ -90,6 +92,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         slowTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.slowPoll() }
         slowTimer?.tolerance = 0.2
         RunLoop.main.add(slowTimer!, forMode: .common)
+        watchClicks()
     }
 
     /// `open Sheer.app --args --enable-login-item` registers the login item (used by install scripts).
@@ -323,6 +326,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func spaceChanged() {
         switchingUntil = Date() + 1.5
+        updateShiftFollowing()
         placeInSpaces()   // picks up newly created desktop Spaces
         retrySupport()
         reloadWallpapers(); reader.scheduleRefresh()
@@ -362,7 +366,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bars = SystemMenuBars.all()
         menuBarIDs = bars.map(\.windowID)
         let ids = Set(NSScreen.screens.map(\.displayID))
-        for (id, w) in overlays where !ids.contains(id) { w.orderOut(nil); overlays[id] = nil }
+        for (id, w) in overlays where !ids.contains(id) { w.orderOut(nil); StageShiftFollower.shared.remove(w); overlays[id] = nil }
         for screen in NSScreen.screens where overlays[screen.displayID] == nil {
             let w = OverlayWindow()
             w.display = screen.displayID
@@ -503,6 +507,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func poll() {
         scanWindows()
         updateVisibility(SystemMenuBars.refresh(menuBarIDs))
+        updateShiftFollowing()
+        StageShiftFollower.shared.check()
         // Follow windows closely only while the mouse is held (dragging, resizing); otherwise 4 Hz is
         // plenty and keeps the idle cost down.
         if NSEvent.pressedMouseButtons & 1 != 0 && fastTimer == nil {
@@ -512,6 +518,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if NSEvent.pressedMouseButtons & 1 == 0 { self.fastTimer?.invalidate(); self.fastTimer = nil }
             }
             RunLoop.main.add(fastTimer!, forMode: .common)
+        }
+    }
+
+    /// Stage Manager's shifts (see StageShift.swift) start on a click in its strip; follow them at every
+    /// display refresh from there. Space switches and Mission Control move the bars on purpose.
+    private var clickMonitor: Any?
+    private func updateShiftFollowing() {
+        StageShiftFollower.shared.setPaused(missionControl || Date() < switchingUntil)
+    }
+
+    private func watchClicks() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { _ in
+            StageShiftFollower.shared.follow(for: 1.5)
         }
     }
 
@@ -581,6 +601,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func enterMissionControl() {
         guard !missionControl, dockShowsMissionControl() else { return }
         missionControl = true
+        updateShiftFollowing()
         updateVisibility()
         mcTimer?.invalidate()
         mcTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
@@ -594,6 +615,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mcTimer?.invalidate(); mcTimer = nil
         guard missionControl else { return }
         missionControl = false
+        updateShiftFollowing()
         slideInNext = true
         updateVisibility()
         slideInNext = false
@@ -701,7 +723,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 continue
             }
             let bar = menuBar(for: id, in: bars)
-            if fullScreen != lastFullScreen[id] { lastFullScreen[id] = fullScreen; switchingUntil = Date() + 1.5 }
+            if fullScreen != lastFullScreen[id] { lastFullScreen[id] = fullScreen; switchingUntil = Date() + 1.5; updateShiftFollowing() }
             let switching = bar == nil || (bar?.onScreen != true && Date() < switchingUntil)
             if w.onDesktopSpacesOnly && w.isVisible && (fullScreen || switching) { w.syncScrim(); continue }
             let db = CGDisplayBounds(id)

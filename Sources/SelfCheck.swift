@@ -8,6 +8,31 @@ import AppKit
 import ScreenCaptureKit
 
 extension AppController {
+    /// "sheer.test-click" with object "x,y" (global points, top-left origin): move the pointer there and
+    /// click; "move:x,y" only moves it. For driving Stage Manager's strip while testing.
+    @objc func testClick(_ n: Notification) {
+        guard Debug.enabled, var s = n.object as? String else { return }
+        let moveOnly = s.hasPrefix("move:")
+        if moveOnly { s.removeFirst(5) }
+        let v = s.split(separator: ",").compactMap { Double($0) }
+        guard v.count == 2 else { return }
+        let p = CGPoint(x: v[0], y: v[1])
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        guard !moveOnly else { return }
+        StageShiftFollower.shared.follow(for: 1.5)   // as a real click would (the click monitor doesn't see Sheer's own events)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// "sheer.test-follow" with "0" or "1": turn undoing Stage Manager's shift off or on.
+    @objc func testFollow(_ n: Notification) {
+        guard Debug.enabled else { return }
+        StageShiftFollower.shared.enabled = (n.object as? String) != "0"
+    }
+
     @objc func selfCheck() {
         guard Debug.enabled else { return }
         var report = "time: \(Date())\n"

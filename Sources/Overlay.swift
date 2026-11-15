@@ -311,6 +311,20 @@ enum SkyLight {
 
     static var isAvailable: Bool { conn != nil && setSub != nil }
 
+    // Where the window server shows a window — including any shift Stage Manager applies, which AppKit's
+    // `frame` doesn't know about — to the fraction of a point (the window list rounds it). The transform
+    // maps screen to window.
+    private typealias GetTransform = @convention(c) (Int32, UInt32, UnsafeMutablePointer<CGAffineTransform>) -> Int32
+    private static let shownTransform: GetTransform? = dlsym(handle, "SLSGetCatenatedWindowTransform").map { unsafeBitCast($0, to: GetTransform.self) }
+
+    /// Left edge in global coordinates, as the window server shows it.
+    static func shownX(_ windowNumber: Int) -> CGFloat? {
+        guard windowNumber > 0, let conn, let shownTransform else { return nil }
+        var t = CGAffineTransform.identity
+        guard shownTransform(conn(), UInt32(windowNumber), &t) == 0 else { return nil }
+        return -t.tx
+    }
+
     @discardableResult
     static func setSubLevel(_ windowNumber: Int, _ sub: Int32) -> Bool {
         guard windowNumber > 0, let conn, let setSub else { return false }
@@ -408,13 +422,15 @@ enum SkyLight {
 final class OverlayWindow: NSPanel {
     let bar = BarView()
     let scrim = DesktopScrimWindow()
+    /// Holds the bar, with room to either side of it (see StageShift.swift).
+    private let holder = NSView()
 
     init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .mainMenu          // 24, plus sublevel 1 in show()
         ignoresMouseEvents = true  // clicks go through to the real menu bar
         hasShadow = false
-        isOpaque = true
+        isOpaque = false           // the room beside the bar is see-through
         backgroundColor = .clear
         collectionBehavior = OverlayWindow.allSpaces
         isReleasedWhenClosed = false
@@ -424,7 +440,9 @@ final class OverlayWindow: NSPanel {
         title = "Sheer Overlay"
         bar.wantsLayer = true
         bar.layerContentsRedrawPolicy = .onSetNeedsDisplay
-        contentView = bar
+        holder.wantsLayer = true
+        holder.addSubview(bar)
+        contentView = holder
     }
 
     override var canBecomeKey: Bool { false }
@@ -437,6 +455,7 @@ final class OverlayWindow: NSPanel {
     func slideOut() {
         guard isVisible, !sliding else { return }
         sliding = true
+        updateFollower()
         scrim.orderOut(nil)
         let f = frame
         NSAnimationContext.runAnimationGroup({ c in
@@ -447,12 +466,14 @@ final class OverlayWindow: NSPanel {
             self.orderOut(nil)
             self.setFrame(f, display: false)
             self.sliding = false
+            self.updateFollower(moved: true)
         })
     }
 
     func slideIn() {
         guard !sliding else { return }
         sliding = true
+        updateFollower()
         let f = frame
         setFrame(f.offsetBy(dx: 0, dy: f.height), display: false)
         show()
@@ -463,6 +484,7 @@ final class OverlayWindow: NSPanel {
         }, completionHandler: {
             self.setFrame(f, display: false)
             self.sliding = false
+            self.updateFollower(moved: true)
             self.syncScrim()
         })
     }
@@ -471,14 +493,17 @@ final class OverlayWindow: NSPanel {
         orderFrontRegardless()
         SkyLight.setSubLevel(windowNumber, 1)
         orderFrontRegardless()
+        updateFollower()
         syncScrim()
         if let display { placeInSpaces(display: display) }
     }
 
     // MARK: Spaces
 
-    static let allSpaces: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
-    static let ownSpaces: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone]
+    // .canJoinAllApplications: part of every Stage Manager set. Otherwise Stage Manager counts these
+    // windows in with the frontmost set and shrinks them away with it (clicking the app icon on a set).
+    static let allSpaces: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone, .canJoinAllApplications]
+    static let ownSpaces: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone, .canJoinAllApplications]
 
     var display: CGDirectDisplayID?
     /// On the display's desktop Spaces only, so it slides with them and full-screen Spaces never see it.
@@ -487,7 +512,7 @@ final class OverlayWindow: NSPanel {
 
     func placeInSpaces(display: CGDirectDisplayID) {
         guard SkyLight.canPlaceInSpaces, placementFailures < 3, isVisible else { return }
-        if !onDesktopSpacesOnly { collectionBehavior = Self.ownSpaces; scrim.collectionBehavior = Self.ownSpaces }
+        if !onDesktopSpacesOnly { setBehavior(Self.ownSpaces) }
         let wins = scrim.isVisible ? [windowNumber, scrim.windowNumber] : [windowNumber]
         if SkyLight.placeOnDesktopSpaces(wins, display: display) {
             onDesktopSpacesOnly = true
@@ -495,20 +520,25 @@ final class OverlayWindow: NSPanel {
         } else {
             placementFailures += 1
             onDesktopSpacesOnly = false
-            collectionBehavior = Self.allSpaces; scrim.collectionBehavior = Self.allSpaces
+            setBehavior(Self.allSpaces)
         }
+    }
+
+    private func setBehavior(_ b: NSWindow.CollectionBehavior) {
+        collectionBehavior = b; scrim.collectionBehavior = b
     }
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
         scrim.orderOut(sender)
+        updateFollower()
     }
 
     /// Keep the below-the-bar part of the gradient in step with the part drawn in the bar.
     func syncScrim() {
         let a0 = bar.scrimTop
         scrim.view.image = bar.scrimImage
-        scrim.view.barHeight = frame.height
+        scrim.view.barHeight = bar.frame.height
         if isVisible && !sliding && a0 > 0.005 {
             if !scrim.isVisible {
                 scrim.orderFrontRegardless()
@@ -536,14 +566,48 @@ final class OverlayWindow: NSPanel {
         place(f, s)
     }
 
+    // MARK: Stage Manager (see StageShift.swift)
+
+    /// How much room beside the bar, at most: more than Stage Manager shifts the stage.
+    static let reach: CGFloat = 320
+    private var room: (left: CGFloat, right: CGFloat) = (0, 0)
+
+    /// Room on each side, up to `reach`, but not over another display (the window would show there).
+    private func room(beside f: NSRect) -> (left: CGFloat, right: CGFloat) {
+        var l = Self.reach, r = Self.reach
+        for s in NSScreen.screens.map(\.frame) where !s.intersects(f) && s.minY < f.maxY && s.maxY > f.minY {
+            if s.maxX <= f.minX { l = min(l, f.minX - s.maxX) }
+            if s.minX >= f.maxX { r = min(r, s.minX - f.maxX) }
+        }
+        return (max(0, l), max(0, r))
+    }
+
+    /// Tell the follower where the bar's window is and whether to keep the bar in place.
+    private func updateFollower(moved: Bool = false) {
+        var b = StageShiftFollower.Bar(window: windowNumber)
+        b.layer = holder.layer
+        b.home = frame.minX + room.left
+        b.room = room
+        b.scale = backingScaleFactor
+        b.active = isVisible && !sliding
+        b.settlesAt = moved ? CACurrentMediaTime() + 0.1 : 0
+        StageShiftFollower.shared.update(self, b)
+    }
+
     private func place(_ barFrame: NSRect, _ scrimFrame: NSRect) {
         let f = barFrame.offsetBy(dx: 0, dy: raise), s = scrimFrame.offsetBy(dx: 0, dy: raise)
-        if frame != f {
+        room = room(beside: f)
+        let w = NSRect(x: f.minX - room.left, y: f.minY, width: f.width + room.left + room.right, height: f.height)
+        let moved = frame != w
+        if moved {
             #if SHEER_DEBUG
-            Debug.append(String(format: "%.3f layout %@ -> %@\n", Date().timeIntervalSince1970, NSStringFromRect(frame), NSStringFromRect(f)), "layout.txt")
+            Debug.append(String(format: "%.3f layout %@ -> %@\n", Date().timeIntervalSince1970, NSStringFromRect(frame), NSStringFromRect(w)), "layout.txt")
             #endif
-            setFrame(f, display: true)
+            setFrame(w, display: true)
         }
+        let b = NSRect(origin: NSPoint(x: room.left, y: 0), size: f.size)
+        if bar.frame != b { bar.frame = b }
+        updateFollower(moved: moved)
         if scrim.frame != s { scrim.setFrame(s, display: true) }
     }
 }
