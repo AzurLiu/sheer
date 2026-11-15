@@ -75,7 +75,7 @@ An app you build yourself isn't quarantined, so Gatekeeper won't block it.
 
 Without Screen Recording, Sheer shows the normal menu bar for those wallpapers and opens its permissions window to say so. The capture is of the wallpaper only, and nothing is saved.
 
-Sheer collects nothing. Its only network request is a once-a-day check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed unless you click **Update**, and then only the release itself, from GitHub.
+Sheer collects nothing. Its only network request is an hourly check of this repository's latest version number on GitHub; if there's a newer one, the Sheer menu shows **Update Available**. Nothing is downloaded or installed unless you click **Update**, and then only the release itself, from GitHub.
 
 > macOS 15 periodically asks whether apps may keep recording the screen. You'll only see this with the wallpapers listed above.
 
@@ -144,6 +144,8 @@ Releases are built by GitHub Actions when a `v*` tag is pushed.
    （也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Sheer.app`。）
 3. Sheer 会弹出授权窗口，列出它需要的权限，每项各有一个按钮：**辅助功能**（必需）和 **屏幕录制**（仅 Sequoia 等实时壁纸需要；Sequoia 是 macOS 15 的默认壁纸）。按提示授权后窗口会自动关闭。
 
+有新版本时 Sheer 会提示，点「更新」即可：它会从 GitHub 下载新版本，确认是用 Sheer 自己的证书签名的正版后替换并重新打开，授权保留，也不会再被系统拦。（1.0.14 之前的版本是临时签名，从那些版本升级需要最后一次手动下载并重新授权。）
+
 也可以自己编译（只需 Xcode 命令行工具）：`./build.sh`，自己编译的 App 不会被拦。
 
 ### 权限
@@ -152,7 +154,7 @@ Releases are built by GitHub Actions when a `v*` tag is pushed.
 - **定位（可选，仅在用得上时才会问）**：系统按这台 Mac 的位置给动态壁纸计时的时候，Sheer 用同一个位置，菜单栏才能和桌面同一时刻换图。只取大致位置，只留在本机。
 - **屏幕录制（仅特殊壁纸）**：只有 Sequoia、Macintosh、航拍等实时渲染壁纸、随机轮换壁纸、或每个屏幕 / 空间用不同壁纸时才需要：换壁纸时截取一次，解锁时实时同步几秒。没有这项权限时，用这类壁纸会显示系统原本的菜单栏，Sheer 会弹出授权窗口说明原因。只读取壁纸本身，不保存任何内容。
 
-Sheer 不收集任何数据。唯一的联网是每天一次向 GitHub 查询最新版本号；有新版本时，Sheer 菜单里会出现「有新版本」，不会自动下载或安装。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
+Sheer 不收集任何数据。唯一的联网是每小时一次向 GitHub 查询最新版本号；有新版本时，Sheer 菜单里会出现「有新版本」。只有你点了「更新」才会下载，下载的也只是 GitHub 上的正式版本身。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
 
 ### 已知限制
 

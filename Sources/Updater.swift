@@ -1,4 +1,4 @@
-// Update check: once a day, ask GitHub for the latest release's version number and notes. If it's
+// Update check: every hour, ask GitHub for the latest release's version number and notes. If it's
 // newer, Sheer says so once (what changed, with an Update button) and its menu keeps an "Update
 // Available" item. Nothing is downloaded or installed unless the user chooses to, and nothing about
 // the Mac is sent.
@@ -16,7 +16,7 @@ import Security
 final class UpdateChecker {
     static let releasesPage = URL(string: "https://github.com/AzurLiu/sheer/releases/latest")!
     private static let api = URL(string: "https://api.github.com/repos/AzurLiu/sheer/releases/latest")!
-    private static let interval: TimeInterval = 24 * 3600
+    private static let interval: TimeInterval = 3600
 
     /// Newer version available (e.g. "1.0.3"), or nil.
     private(set) var available: String?
@@ -33,8 +33,9 @@ final class UpdateChecker {
     func start() {
         apply(defaults.string(forKey: "latestVersion"))   // last known result, so the menu is right immediately
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkIfDue() }
-        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in self?.checkIfDue() }
-        timer?.tolerance = 600
+        // Checked every quarter hour so a check is never put off much past the hour (or past waking).
+        timer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in self?.checkIfDue() }
+        timer?.tolerance = 120
     }
 
     private func checkIfDue() {
