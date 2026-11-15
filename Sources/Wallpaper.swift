@@ -65,6 +65,25 @@ final class WallpaperProvider {
             }
         }
 
+        // A sun-following wallpaper: the computed frame is right as long as the desktop works from the
+        // inputs Sheer can see. It doesn't always (it keeps a position it was once given, for one), so
+        // with Screen Recording allowed, look at which image the desktop actually shows: a tiny
+        // capture, only when the computed frame changes or every ten minutes.
+        if case .file(let url, _, true) = source, CGPreflightScreenCaptureAccess() {
+            let computed = Self.frameIndex(url, dark: false, solar: true, observed: false)
+            // Check every ten minutes while the desktop agrees with the computation, every minute
+            // while it doesn't (its next change can't be predicted then).
+            Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
+            let trusted = seen == nil || seen!.url != url || seen!.frame == computed
+            let due = computed != lastComputedFrame || Date().timeIntervalSince(lastVerified) > (trusted ? 600 : 55)
+            lastComputedFrame = computed
+            if due {
+                lastVerified = Date()
+                verifyFrame(url: url, screen: screen) { decode("file \(source)") }
+                return
+            }
+        }
+
         if needsCapture && CGPreflightScreenCaptureAccess() {
             captureStrip(for: screen, barHeight: barHeight) { [weak self] img in
                 self?.done(img, img == nil ? "capture failed" : "capture", completion)
@@ -78,7 +97,82 @@ final class WallpaperProvider {
         }
     }
 
-    func invalidate() { queue.async { self.fileCache.removeAll() } }
+    func invalidate() { queue.async { self.fileCache.removeAll() }; lastVerified = .distantPast }
+
+    // MARK: Which image a Dynamic wallpaper shows
+
+    private var lastComputedFrame = -1
+    private var lastVerified = Date.distantPast
+    /// The frame seen on the desktop, for this file. Read on `queue` (frameIndex), written on main.
+    private static let observedLock = NSLock()
+    private static var observed: (url: URL, frame: Int)?
+    private var frameThumbs: (url: URL, grids: [[Double]])?   // touched only on `queue`
+
+    private func verifyFrame(url: URL, screen: NSScreen, then: @escaping () -> Void) {
+        let aspect = Double(screen.frame.width / screen.frame.height)
+        let displaySpace = screen.colorSpace?.cgColorSpace
+        Task {
+            var grid: [Double]?
+            if let win = try? await Self.wallpaperWindow(for: screen) {
+                let cfg = SCStreamConfiguration()
+                cfg.width = 256; cfg.height = max(1, Int(256 / aspect)); cfg.showsCursor = false
+                if let shot = try? await SCScreenshotManager.captureImage(
+                    contentFilter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg) {
+                    // Captures are the display's own values: tag them so (see onDisplay).
+                    grid = Self.grid(displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot, aspect: aspect)
+                }
+            }
+            let seen = grid
+            queue.async { [weak self] in
+                guard let self else { return }
+                var frame: Int?
+                if let seen {
+                    if self.frameThumbs?.url != url {
+                        self.frameThumbs = (url, Self.frameGrids(url, aspect: aspect))
+                    }
+                    let d: [Double] = self.frameThumbs!.grids.map { g in Self.distance(g, seen) }
+                    // Accept a clear match only: the nearest frame close, the next one well apart.
+                    let order = d.indices.sorted { d[$0] < d[$1] }
+                    if let best = order.first, d[best] < 12, order.count < 2 || d[order[1]] > d[best] * 2 + 6 { frame = best }
+                    Debug.write("\(Date()) desktop frame distances \(d.map { Int($0) }) -> \(frame.map(String.init) ?? "unclear")\n", "frame.txt")
+                }
+                Self.observedLock.lock(); Self.observed = frame.map { (url, $0) }; Self.observedLock.unlock()
+                DispatchQueue.main.async { then() }
+            }
+        }
+    }
+
+    private static func distance(_ a: [Double], _ b: [Double]) -> Double {
+        guard !a.isEmpty, a.count == b.count else { return .infinity }
+        var sum = 0.0
+        for i in a.indices { sum += abs(a[i] - b[i]) }
+        return sum / Double(a.count)
+    }
+
+    /// 16×16 colour grid of the image, cropped to the screen's shape the way the desktop fills it.
+    private static func grid(_ img: CGImage, aspect: Double) -> [Double] {
+        let w = Double(img.width), h = Double(img.height)
+        var r = CGRect(x: 0, y: 0, width: w, height: h)
+        if w / h > aspect { let nw = h * aspect; r = CGRect(x: (w - nw) / 2, y: 0, width: nw, height: h) }
+        else { let nh = w / aspect; r = CGRect(x: 0, y: (h - nh) / 2, width: w, height: nh) }
+        guard let c = img.cropping(to: r.integral) else { return [] }
+        let n = 16
+        guard let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return [] }
+        ctx.interpolationQuality = .medium
+        ctx.draw(c, in: CGRect(x: 0, y: 0, width: n, height: n))
+        let p = ctx.data!.assumingMemoryBound(to: UInt8.self)
+        return (0..<(n * n * 4)).filter { $0 % 4 != 3 }.map { Double(p[$0]) }
+    }
+
+    private static func frameGrids(_ url: URL, aspect: Double) -> [[Double]] {
+        guard let src = CGImageSourceCreateWithURL(url.resolvingSymlinksInPath() as CFURL, nil) else { return [] }
+        let opts = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 256] as CFDictionary
+        return (0..<CGImageSourceGetCount(src)).map { i in
+            CGImageSourceCreateThumbnailAtIndex(src, i, opts).map { grid($0, aspect: aspect) } ?? []
+        }
+    }
 
     private func done(_ img: CGImage?, _ source: String, _ completion: (CGImage?) -> Void) {
         lastSource = source
@@ -298,7 +392,11 @@ final class WallpaperProvider {
     }
 
     /// Which image of a (possibly dynamic) HEIC the desktop shows.
-    static func frameIndex(_ url: URL, dark: Bool, solar: Bool) -> Int {
+    static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true) -> Int {
+        if solar && useObserved {
+            observedLock.lock(); let seen = observed; observedLock.unlock()
+            if let seen, seen.url == url { return seen.frame }
+        }
         guard url.pathExtension.lowercased() == "heic",
               let src = CGImageSourceCreateWithURL(url.resolvingSymlinksInPath() as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(src) > 1, let md = CGImageSourceCopyMetadataAtIndex(src, 0, nil) else { return 0 }

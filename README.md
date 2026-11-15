@@ -87,7 +87,7 @@ Placing the window between those two levels uses a private SkyLight call. If a m
 - Tested on a MacBook with a notch (37 pt menu bar). Metrics for 24 pt menu bars and multi-display setups are derived, not yet verified — reports welcome.
 - Apps that show icons instead of text in their menu titles fall back to the normal menu bar while they're frontmost.
 - The light-mode selection highlight colour is an estimate.
-- Dynamic wallpapers change frame at the same moment as the desktop. If *Setting time zone* is allowed to use Location Services, the desktop times them by where the Mac is, and Sheer offers to use the same position; decline, and it estimates from the time zone's city, so frames may change a few minutes apart.
+- Dynamic wallpapers change frame at the same moment as the desktop. With Screen Recording allowed, Sheer also checks now and then which image the desktop really shows, which covers the cases it can't work out (macOS keeps using a position it was given after location is switched off, for one). If *Setting time zone* is allowed to use Location Services, the desktop times them by where the Mac is, and Sheer offers to use the same position; decline, and it estimates from the time zone's city, so frames may change a few minutes apart.
 
 ## Uninstall
 
@@ -151,4 +151,4 @@ Sheer 不收集任何数据。唯一的联网是每天一次向 GitHub 查询最
 
 - 只在刘海屏 MacBook（37pt 菜单栏）上实测过；普通 24pt 菜单栏和多显示器的效果是推算的。
 - 菜单标题是图标而不是文字的应用，在前台时会退回系统原生菜单栏。
-- 动态壁纸与桌面同一时刻换帧。如果「设置时区」被允许使用定位服务，桌面会按这台 Mac 的位置计时，Sheer 会询问能否使用同一位置；不允许的话，它按时区所在城市估算，换帧可能相差几分钟。
+- 动态壁纸与桌面同一时刻换帧。如果允许了屏幕录制，Sheer 还会不时核对桌面实际显示的是哪一张，覆盖它推算不出来的情况（比如关掉定位后，系统仍沿用之前拿到的位置）。如果「设置时区」被允许使用定位服务，桌面会按这台 Mac 的位置计时，Sheer 会询问能否使用同一位置；不允许的话，它按时区所在城市估算，换帧可能相差几分钟。
