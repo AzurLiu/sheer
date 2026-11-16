@@ -30,7 +30,8 @@ Why it doesn't feel like an add-on:
 
 ## Requirements
 
-- macOS 15 Sequoia. Built for macOS 14 and later, but only tested on macOS 15.
+- macOS 15 Sequoia. Built for macOS 12.3 and later, but only tested on macOS 15.
+- **macOS 12 Monterey and 13 Ventura: experimental, untested.** Sheer is built to run there, but nobody has tried it on those systems yet; see [On macOS 12 and 13](#on-macos-12-and-13).
 - On macOS 26 and later Sheer isn't needed — it tells you so and quits.
 
 ## Install
@@ -95,6 +96,17 @@ Placing the window between those two levels uses a private SkyLight call. If a m
 - Apps that show icons instead of text in their menu titles fall back to the normal menu bar while they're frontmost.
 - The light-mode selection highlight colour is an estimate.
 - Dynamic wallpapers change frame at the same moment as the desktop. With Screen Recording allowed, Sheer also checks now and then which image the desktop really shows, which covers the cases it can't work out (macOS keeps using a position it was given after location is switched off, for one). If *Setting time zone* is allowed to use Location Services, the desktop times them by where the Mac is, and Sheer offers to use the same position; decline, and it estimates from the time zone's city, so frames may change a few minutes apart.
+
+### On macOS 12 and 13
+
+Support for macOS 12.3 Monterey and 13 Ventura is new and **hasn't been tested on either system**. What's different there:
+
+- On macOS 12, the first-launch **Open Anyway** button is under **System Preferences → Security & Privacy → General**.
+- **Launch at Login** isn't in Sheer's menu on macOS 12; add Sheer under **System Preferences → Users & Groups → Login Items** instead.
+- The wallpaper comes from the picture macOS reports for each display. A Dynamic wallpaper is assumed to be set to *Dynamic* (following the sun); if you chose *Light (Still)* or *Dark (Still)*, allow Screen Recording so Sheer can see which image the desktop shows. A folder of pictures that changes every so often needs Screen Recording too.
+- The menu titles are drawn with macOS 15's measurements, which may not match older menu bars exactly.
+
+If you try it, please [open an issue](../../issues) with your macOS version, Mac model, a screenshot of the top of the screen with Sheer on and off, and whether the menu bar stays transparent through Space switches, Mission Control, full-screen apps and (on 13) Stage Manager. If Sheer can't find the system menu bar it stays hidden and the normal menu bar shows; say so too.
 
 ## Uninstall
 
@@ -161,6 +173,17 @@ Chinese, then the install line, separated by `---`), then tag.
 - **屏幕录制（仅特殊壁纸）**：只有 Sequoia、Macintosh、航拍等实时渲染壁纸、随机轮换壁纸、或每个屏幕 / 空间用不同壁纸时才需要：换壁纸时截取一次，解锁时实时同步几秒。没有这项权限时，用这类壁纸会显示系统原本的菜单栏，Sheer 会弹出授权窗口说明原因。只读取壁纸本身，不保存任何内容。
 
 Sheer 不收集任何数据。唯一的联网是每小时一次向 GitHub 查询最新版本号；有新版本时，Sheer 菜单里会出现「有新版本」。只有你点了「更新」才会下载，下载的也只是 GitHub 上的正式版本身。macOS 26 及以后已自带透明菜单栏，Sheer 会提示后自动退出。
+
+### macOS 12 / 13（实验性，未经测试）
+
+Sheer 现在可以在 macOS 12.3 Monterey 和 13 Ventura 上运行，但**还没有人在这两个系统上实际测试过**。和 macOS 15 的不同之处：
+
+- macOS 12 第一次打开时的「仍要打开」在 **系统偏好设置 → 安全性与隐私 → 通用** 里。
+- macOS 12 的 Sheer 菜单里没有「登录时打开」，请到 **系统偏好设置 → 用户与群组 → 登录项** 里添加 Sheer。
+- 壁纸取自系统报告的每个屏幕的图片。动态壁纸默认按「动态」（随太阳变化）处理；如果选的是「浅色（静态）」或「深色（静态）」，请允许屏幕录制，Sheer 会核对桌面实际显示的是哪一张。定时更换的图片文件夹也需要屏幕录制。
+- 菜单文字按 macOS 15 的尺寸绘制，在旧系统的菜单栏上可能对不齐。
+
+如果你试用了，欢迎 [提交 issue](../../issues)：写上系统版本、Mac 型号，附上开启和关闭 Sheer 时屏幕顶部的截图，并说明切换空间、调度中心、全屏应用以及（macOS 13 上的）台前调度时菜单栏是否保持透明。如果 Sheer 找不到系统菜单栏，它会保持隐藏、显示系统原本的菜单栏，这种情况也请告诉我们。
 
 ### 已知限制
 

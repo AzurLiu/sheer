@@ -502,8 +502,12 @@ final class OverlayWindow: NSPanel {
 
     // .canJoinAllApplications: part of every Stage Manager set. Otherwise Stage Manager counts these
     // windows in with the frontmost set and shrinks them away with it (clicking the app icon on a set).
-    static let allSpaces: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone, .canJoinAllApplications]
-    static let ownSpaces: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone, .canJoinAllApplications]
+    // (Stage Manager and that flag arrived in macOS 13.)
+    static let allSpaces: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone, stageSets]
+    static let ownSpaces: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone, stageSets]
+    private static var stageSets: NSWindow.CollectionBehavior {
+        if #available(macOS 13, *) { return .canJoinAllApplications } else { return [] }
+    }
 
     var display: CGDirectDisplayID?
     /// On the display's desktop Spaces only, so it slides with them and full-screen Spaces never see it.

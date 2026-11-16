@@ -99,6 +99,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// `open Sheer.app --args --enable-login-item` registers the login item (used by install scripts).
     private func handleCommandLine() {
         guard CommandLine.arguments.contains("--enable-login-item") else { return }
+        guard #available(macOS 13, *) else { Debug.write("unsupported before macOS 13\n", "login.txt"); return }
         try? SMAppService.mainApp.unregister()
         let result: String
         do { try SMAppService.mainApp.register(); result = "ok" } catch { result = "error: \(error.localizedDescription)" }
@@ -281,7 +282,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if wallpapers.needsCapture && !CGPreflightScreenCaptureAccess() {
             add(L("menu.grant-screen-recording"), #selector(openScreenRecording))
         }
-        add(L("menu.launch-at-login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
+        // macOS 12 has no SMAppService: Sheer is added under Users & Groups → Login Items there.
+        if #available(macOS 13, *) {
+            add(L("menu.launch-at-login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
+        }
         add(L("menu.about"), #selector(showAbout))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -316,6 +320,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }
 
+    @available(macOS 13, *)
     @objc private func toggleLogin() {
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }

@@ -128,9 +128,14 @@ final class WallpaperProvider {
     private func verifyFrame(url: URL, screen: NSScreen, then: @escaping () -> Void) {
         let aspect = Double(screen.frame.width / screen.frame.height)
         let displaySpace = screen.colorSpace?.cgColorSpace
+        let display = screen.displayID
         Task {
             var grid: [Double]?
-            if let win = try? await Self.wallpaperWindow(for: screen) {
+            if #unavailable(macOS 14) {
+                if let shot = Self.legacyCapture(display, rows: nil) {
+                    grid = Self.grid(displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot, aspect: aspect)
+                }
+            } else if let win = try? await Self.wallpaperWindow(for: screen) {
                 let cfg = SCStreamConfiguration()
                 cfg.width = 256; cfg.height = max(1, Int(256 / aspect)); cfg.showsCursor = false
                 if let shot = try? await SCScreenshotManager.captureImage(
@@ -205,10 +210,43 @@ final class WallpaperProvider {
         let displayBounds = CGDisplayBounds(screen.displayID)
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         return content.windows.first(where: {
-            ($0.title ?? "").hasPrefix("Wallpaper") &&
+            isWallpaperTitle($0.title) &&
             $0.owningApplication?.bundleIdentifier == "com.apple.dock" &&
             abs($0.frame.minX - displayBounds.minX) < 1 && abs($0.frame.minY - displayBounds.minY) < 1
         })
+    }
+
+    /// The Dock titles its wallpaper windows "Wallpaper-…" from macOS 14 on, "Desktop Picture - …" before
+    /// (on macOS 12 and 13; not yet seen there).
+    private static func isWallpaperTitle(_ title: String?) -> Bool {
+        guard let title else { return false }
+        if title.hasPrefix("Wallpaper") { return true }
+        if #unavailable(macOS 14) { return title.hasPrefix("Desktop Picture") }
+        return false
+    }
+
+    /// macOS 12 and 13 have no SCScreenshotManager: capture the Dock's wallpaper window on this display
+    /// through CGWindowList. `rows`: the top rows only, at full resolution; nil: the whole window at
+    /// nominal resolution (to tell which image a Dynamic wallpaper shows).
+    @available(macOS, deprecated: 14, message: "SCScreenshotManager from macOS 14 on")
+    private static func legacyCapture(_ display: CGDirectDisplayID, rows: CGFloat?) -> CGImage? {
+        let bounds = CGDisplayBounds(display)
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        let candidates = list.filter { w in
+            guard (w[kCGWindowOwnerPID as String] as? Int).map({ pid_t($0) }) == dock,
+                  let b = (w[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0) })
+            else { return false }
+            return abs(b.minX - bounds.minX) < 1 && abs(b.minY - bounds.minY) < 1 && abs(b.width - bounds.width) < 1
+        }
+        // By its title; failing that, the Dock's window at the desktop level.
+        let desktopLevel = Int(CGWindowLevelForKey(.desktopWindow))
+        guard let info = candidates.first(where: { isWallpaperTitle($0[kCGWindowName as String] as? String) })
+                ?? candidates.first(where: { ($0[kCGWindowLayer as String] as? Int) == desktopLevel }),
+              let id = (info[kCGWindowNumber as String] as? Int).map({ CGWindowID($0) }) else { return nil }
+        let rect = CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: rows ?? bounds.height)
+        return CGWindowListCreateImage(rect, .optionIncludingWindow, id,
+                                       rows == nil ? [.boundsIgnoreFraming, .nominalResolution] : [.boundsIgnoreFraming, .bestResolution])
     }
 
     /// Captures come back as untagged device RGB, which drawing treats as sRGB and converts — shifting
@@ -228,16 +266,19 @@ final class WallpaperProvider {
         cfg.width = Int(win.frame.width * scale)
         cfg.height = Int(barHeight * scale)
         cfg.showsCursor = false
-        cfg.ignoreShadowsSingleWindow = true
+        if #available(macOS 14, *) { cfg.ignoreShadowsSingleWindow = true }
         return cfg
     }
 
     private func captureStrip(for screen: NSScreen, barHeight: CGFloat, completion: @escaping (CGImage?) -> Void) {
         let scale = screen.backingScaleFactor
+        let display = screen.displayID
         Task {
             var image: CGImage?
             do {
-                if let win = try await Self.wallpaperWindow(for: screen) {
+                if #unavailable(macOS 14) {
+                    image = Self.legacyCapture(display, rows: barHeight).map { Self.onDisplay($0, screen) }
+                } else if let win = try await Self.wallpaperWindow(for: screen) {
                     let shot = try await SCScreenshotManager.captureImage(
                         contentFilter: SCContentFilter(desktopIndependentWindow: win),
                         configuration: Self.stripConfig(win, barHeight: barHeight, scale: scale))
@@ -265,7 +306,10 @@ final class WallpaperProvider {
     /// macOS 14+ keeps the wallpaper choice in Index.plist; NSWorkspace.desktopImageURL often still
     /// reports the old default picture there.
     static func resolve(dark systemDark: Bool) -> Source {
-        guard let root = storeRoot() else { return .systemDefault }
+        guard let root = storeRoot() else {
+            if #unavailable(macOS 14) { return resolveLegacy(dark: systemDark) }
+            return .systemDefault
+        }
 
         // Different wallpapers per display or per Space: one global file can't be right everywhere.
         if let displays = root["Displays"] as? [String: Any], !displays.isEmpty { return .needsCapture("per-display wallpaper") }
@@ -323,6 +367,28 @@ final class WallpaperProvider {
             }
         }
         return .needsCapture(provider)
+    }
+
+    /// macOS 12 and 13 have no wallpaper store; NSWorkspace reports each display's picture there.
+    private static func resolveLegacy(dark: Bool) -> Source {
+        let urls = NSScreen.screens.compactMap { NSWorkspace.shared.desktopImageURL(for: $0) }
+        // A folder ("Change picture" every so often): which of its pictures shows isn't reported.
+        if urls.contains(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }) {
+            return .needsCapture("picture folder")
+        }
+        // A Dynamic wallpaper (images timed by the sun) set to its default, "Dynamic", follows the sun.
+        // Its Light and Dark (Still) settings aren't reported; with Screen Recording allowed, Sheer
+        // looks at which image the desktop shows (see verifyFrame).
+        if let url = urls.first, urls.allSatisfy({ $0 == url }), isSunTimed(url) { return .file(url, dark: dark, solar: true) }
+        return .systemDefault
+    }
+
+    /// A HEIC with several images and a sun schedule (apple_desktop:solar).
+    private static func isSunTimed(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "heic",
+              let src = CGImageSourceCreateWithURL(url.resolvingSymlinksInPath() as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(src) > 1, let md = CGImageSourceCopyMetadataAtIndex(src, 0, nil) else { return false }
+        return CGImageMetadataCopyTagWithPath(md, nil, "apple_desktop:solar" as CFString) != nil
     }
 
     // MARK: Decoding a file (background queue)

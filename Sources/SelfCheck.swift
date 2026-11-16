@@ -57,6 +57,12 @@ extension AppController {
 
         guard CGPreflightScreenCaptureAccess(), let screen = NSScreen.screens.first else { return }
         let own = Set(overlays.values.flatMap { [CGWindowID($0.windowNumber), CGWindowID($0.scrim.windowNumber)] })
+        if #unavailable(macOS 14) {
+            for (name, excluded) in [("on", Set<CGWindowID>()), ("off", own)] {
+                Debug.write(Self.legacySnapshot(screen.displayID, excluding: excluded), "selfcheck-\(name).png")
+            }
+            return
+        }
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -68,6 +74,7 @@ extension AppController {
                     cfg.width = display.width * 2
                     cfg.height = 240
                     cfg.showsCursor = false
+                    guard #available(macOS 14, *) else { return }
                     let img = try await SCScreenshotManager.captureImage(
                         contentFilter: SCContentFilter(display: display, excludingWindows: excluded), configuration: cfg)
                     Debug.write(img, "selfcheck-\(name).png")
@@ -76,6 +83,19 @@ extension AppController {
                 Debug.write(report + "capture error: \(error)\n", "selfcheck.txt")
             }
         }
+    }
+
+    /// macOS 12 and 13: the same snapshot through CGWindowList.
+    @available(macOS, deprecated: 14, message: "SCScreenshotManager from macOS 14 on")
+    private static func legacySnapshot(_ display: CGDirectDisplayID, excluding excluded: Set<CGWindowID>) -> CGImage? {
+        let db = CGDisplayBounds(display)
+        let rect = CGRect(x: db.minX, y: db.minY, width: db.width, height: 120)
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        var ids: [UnsafeRawPointer?] = list.compactMap { ($0[kCGWindowNumber as String] as? Int).map { CGWindowID($0) } }
+            .filter { !excluded.contains($0) }
+            .map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        guard let array = CFArrayCreate(nil, &ids, ids.count, nil) else { return nil }
+        return CGImage(windowListFromArrayScreenBounds: rect, windowArray: array, imageOption: [.bestResolution])
     }
 }
 #endif

@@ -80,15 +80,20 @@ final class StageShiftFollower: NSObject {
         followUntil = max(followUntil, CACurrentMediaTime() + seconds)
         let running = link != nil
         lock.unlock()
-        guard !running, let screen = NSScreen.screens.first else { return }
-        let l = screen.displayLink(target: self, selector: #selector(refresh(_:)))
-        lock.lock(); link = l; lock.unlock()
-        perform(#selector(schedule(_:)), on: thread, with: l, waitUntilDone: false)
+        guard !running else { return }
+        if #available(macOS 14, *) {
+            guard let screen = NSScreen.screens.first else { return }
+            let l = screen.displayLink(target: self, selector: #selector(refresh(_:)))
+            lock.lock(); link = l; lock.unlock()
+            perform(#selector(schedule(_:)), on: thread, with: l, waitUntilDone: false)
+        } else if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 13 {   // Stage Manager came with 13
+            startLegacyLink()
+        }
     }
 
     // MARK: On the follower's thread
 
-    private var link: CADisplayLink?
+    private var link: AnyObject?   // CADisplayLink on macOS 14+, CVDisplayLink before
     private lazy var thread: Thread = {
         let t = Thread { RunLoop.current.add(NSMachPort(), forMode: .default); RunLoop.current.run() }
         t.name = "Sheer.StageShift"
@@ -97,18 +102,43 @@ final class StageShiftFollower: NSObject {
         return t
     }()
 
+    @available(macOS 14, *)
     @objc private func schedule(_ l: CADisplayLink) {
         l.add(to: .current, forMode: .common)
     }
 
+    @available(macOS 14, *)
     @objc private func refresh(_ l: CADisplayLink) {
+        if refreshed(l, at: l.timestamp) { l.invalidate() }
+    }
+
+    /// One display refresh. Returns true once following is over (the link is then to be stopped).
+    private func refreshed(_ l: AnyObject, at time: CFTimeInterval) -> Bool {
         let busy = tick()
         lock.lock()
-        if busy { followUntil = max(followUntil, l.timestamp + 0.3) }
-        let done = l.timestamp > followUntil
-        if done { link = nil }
+        if busy { followUntil = max(followUntil, time + 0.3) }
+        let done = time > followUntil
+        if done && link === l { link = nil }
         lock.unlock()
-        if done { l.invalidate() }
+        return done
+    }
+
+    /// macOS 13 has no CADisplayLink on the Mac: a CVDisplayLink calls back at every refresh of the
+    /// main display, on its own thread (explicit, flushed transactions work there too).
+    private func startLegacyLink() {
+        var made: CVDisplayLink?
+        guard CVDisplayLinkCreateWithActiveCGDisplays(&made) == kCVReturnSuccess, let cv = made else { return }
+        CVDisplayLinkSetOutputHandler(cv) { [weak self] l, _, _, _, _ in
+            guard let self else { return kCVReturnSuccess }
+            self.lock.lock(); let current = self.link === l; self.lock.unlock()
+            guard current else { return kCVReturnSuccess }   // already being stopped
+            if self.refreshed(l, at: CACurrentMediaTime()) {
+                DispatchQueue.global(qos: .userInteractive).async { CVDisplayLinkStop(l) }   // not from its own callback
+            }
+            return kCVReturnSuccess
+        }
+        lock.lock(); link = cv; lock.unlock()
+        CVDisplayLinkStart(cv)
     }
 
     /// Read every bar's shift and draw it back in place. Returns true while a shift is changing.
