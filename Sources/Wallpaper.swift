@@ -129,23 +129,8 @@ final class WallpaperProvider {
         let aspect = Double(screen.frame.width / screen.frame.height)
         let displaySpace = screen.colorSpace?.cgColorSpace
         let display = screen.displayID
-        Task {
-            var grid: [Double]?
-            if #unavailable(macOS 14) {
-                if let shot = Self.legacyCapture(display, rows: nil) {
-                    grid = Self.grid(displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot, aspect: aspect)
-                }
-            } else if let win = try? await Self.wallpaperWindow(for: screen) {
-                let cfg = SCStreamConfiguration()
-                cfg.width = 256; cfg.height = max(1, Int(256 / aspect)); cfg.showsCursor = false
-                if let shot = try? await SCScreenshotManager.captureImage(
-                    contentFilter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg) {
-                    // Captures are the display's own values: tag them so (see onDisplay).
-                    grid = Self.grid(displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot, aspect: aspect)
-                }
-            }
-            let seen = grid
-            queue.async { [weak self] in
+        let compare: ([Double]?) -> Void = { [weak self] seen in
+            self?.queue.async { [weak self] in
                 guard let self else { return }
                 var frame: Int?
                 if let seen {
@@ -160,6 +145,27 @@ final class WallpaperProvider {
                 }
                 Self.observedLock.lock(); Self.observed = frame.map { (url, $0) }; Self.observedLock.unlock()
                 DispatchQueue.main.async { then() }
+            }
+        }
+        // Captures are the display's own values: tag them so (see onDisplay).
+        func tagged(_ shot: CGImage) -> CGImage { displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot }
+        if #available(macOS 14, *) {
+            Task {
+                var grid: [Double]?
+                if let win = try? await Self.wallpaperWindow(for: screen) {
+                    let cfg = SCStreamConfiguration()
+                    cfg.width = 256; cfg.height = max(1, Int(256 / aspect)); cfg.showsCursor = false
+                    if let shot = try? await SCScreenshotManager.captureImage(
+                        contentFilter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg) {
+                        grid = Self.grid(tagged(shot), aspect: aspect)
+                    }
+                }
+                compare(grid)
+            }
+        } else {
+            // Before macOS 14 (no SCScreenshotManager, and no ScreenCaptureKit at all before 12.3).
+            DispatchQueue.global(qos: .utility).async {
+                compare(Self.legacyCapture(display, rows: nil).map { Self.grid(tagged($0), aspect: aspect) })
             }
         }
     }
@@ -206,6 +212,7 @@ final class WallpaperProvider {
     // MARK: Capture
 
     /// The Dock's wallpaper window on this display.
+    @available(macOS 12.3, *)
     private static func wallpaperWindow(for screen: NSScreen) async throws -> SCWindow? {
         let displayBounds = CGDisplayBounds(screen.displayID)
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -255,11 +262,14 @@ final class WallpaperProvider {
         screen.colorSpace?.cgColorSpace.flatMap { img.copy(colorSpace: $0) } ?? img
     }
 
+    @available(macOS 12.3, *)
     static func mirrorWindow(for screen: NSScreen) async throws -> SCWindow? { try await wallpaperWindow(for: screen) }
+    @available(macOS 12.3, *)
     static func mirrorConfig(_ win: SCWindow, barHeight: CGFloat, scale: CGFloat) -> SCStreamConfiguration {
         stripConfig(win, barHeight: barHeight, scale: scale)
     }
 
+    @available(macOS 12.3, *)
     private static func stripConfig(_ win: SCWindow, barHeight: CGFloat, scale: CGFloat) -> SCStreamConfiguration {
         let cfg = SCStreamConfiguration()
         cfg.sourceRect = CGRect(x: 0, y: 0, width: win.frame.width, height: barHeight)
@@ -273,12 +283,19 @@ final class WallpaperProvider {
     private func captureStrip(for screen: NSScreen, barHeight: CGFloat, completion: @escaping (CGImage?) -> Void) {
         let scale = screen.backingScaleFactor
         let display = screen.displayID
+        guard #available(macOS 14, *) else {
+            // Before macOS 14 (no SCScreenshotManager, and no ScreenCaptureKit at all before 12.3).
+            let space = screen.colorSpace?.cgColorSpace   // read NSScreen here, on the main thread
+            DispatchQueue.global(qos: .utility).async {
+                let image = Self.legacyCapture(display, rows: barHeight).map { shot in space.flatMap { shot.copy(colorSpace: $0) } ?? shot }
+                DispatchQueue.main.async { completion(image) }
+            }
+            return
+        }
         Task {
             var image: CGImage?
             do {
-                if #unavailable(macOS 14) {
-                    image = Self.legacyCapture(display, rows: barHeight).map { Self.onDisplay($0, screen) }
-                } else if let win = try await Self.wallpaperWindow(for: screen) {
+                if let win = try await Self.wallpaperWindow(for: screen) {
                     let shot = try await SCScreenshotManager.captureImage(
                         contentFilter: SCContentFilter(desktopIndependentWindow: win),
                         configuration: Self.stripConfig(win, barHeight: barHeight, scale: scale))
@@ -642,6 +659,8 @@ enum Solar {
 
 /// Streams the strip of a live-rendered wallpaper while it moves (it plays a short animation as the
 /// screen unlocks), so the bar moves with it instead of catching up with crossfades afterwards.
+/// Needs ScreenCaptureKit's streams (macOS 12.3); before that the bar catches up with crossfades.
+@available(macOS 12.3, *)
 final class LiveMirror: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "sheer.mirror")

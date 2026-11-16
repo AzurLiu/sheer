@@ -355,12 +355,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// A live-rendered wallpaper plays a few seconds of motion as the screen unlocks. Stream it into the
     /// bar meanwhile, frame by frame, so the bar moves with the desktop instead of catching up later.
-    private var mirrors: [LiveMirror] = []
+    private var mirrors: [AnyObject] = []   // LiveMirror (macOS 12.3+)
     private func mirrorWhileSettling() {
+        guard #available(macOS 12.3, *) else { return }   // no streams before: the bar catches up afterwards
         guard wallpapers.needsCapture, CGPreflightScreenCaptureAccess() else { return }
         let seconds = 5.0
         quietUntil = max(quietUntil, Date() + seconds + 0.3)
-        mirrors.forEach { $0.stop() }
+        mirrors.forEach { ($0 as? LiveMirror)?.stop() }
         let bars = SystemMenuBars.refresh(menuBarIDs)
         mirrors = overlays.compactMap { id, w in
             guard let screen = screen(for: id) else { return nil }
@@ -547,6 +548,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// On notched displays menus that don't fit are hidden by the system; don't draw them behind the notch.
     private func filterNotch(_ items: [MenuTitle], screen: NSScreen?, origin: CGPoint) -> [MenuTitle] {
+        guard #available(macOS 12, *) else { return items }   // notched displays came with macOS 12
         guard let screen, let left = screen.auxiliaryTopLeftArea else { return items }
         let limit = origin.x + (left.maxX - screen.frame.minX) + 1
         return items.filter { $0.frame.maxX <= limit }

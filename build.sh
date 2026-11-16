@@ -28,7 +28,7 @@ iconutil -c icns "$TMP/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns
 FLAGS=(-O -swift-version 5)
 (( DEV )) && FLAGS+=(-D SHEER_DEBUG)
 for arch in arm64 x86_64; do
-  swiftc "${FLAGS[@]}" -target "$arch-apple-macos12.3" Sources/*.swift -o "$TMP/Sheer-$arch"
+  swiftc "${FLAGS[@]}" -target "$arch-apple-macos11.0" -Xlinker -weak_framework -Xlinker ScreenCaptureKit Sources/*.swift -o "$TMP/Sheer-$arch"
 done
 lipo -create "$TMP/Sheer-arm64" "$TMP/Sheer-x86_64" -output "$APP/Contents/MacOS/Sheer"
 rm -rf "$TMP"
