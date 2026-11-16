@@ -47,6 +47,15 @@ final class WallpaperProvider {
     private(set) var needsCapture = false
     /// A Dynamic wallpaper following the sun: its frame changes through the day.
     private(set) var followsSun = false
+    /// The desktop may change image any moment (near a computed change, or out of step with the
+    /// computation): the caller should fetch every few seconds instead of every minute.
+    private(set) var checkSoon = false
+
+    /// How close to a computed frame change counts as "near" (the desktop's own position for the sun
+    /// can differ from Sheer's, which moves its change by some minutes either way).
+    private static let nearChange: TimeInterval = 15 * 60
+    /// How often to look at the desktop while a change may be due.
+    private static let soonInterval: TimeInterval = 5
 
     /// Wallpaper strip covering the top `barHeight` points of the screen, in pixels.
     /// nil means it can't be obtained accurately — the caller then shows the system menu bar
@@ -68,14 +77,22 @@ final class WallpaperProvider {
         // A sun-following wallpaper: the computed frame is right as long as the desktop works from the
         // inputs Sheer can see. It doesn't always (it keeps a position it was once given, for one), so
         // with Screen Recording allowed, look at which image the desktop actually shows: a tiny
-        // capture, only when the computed frame changes or every ten minutes.
+        // capture, when the computed frame changes, every ten minutes, and every few seconds while
+        // the desktop's change may be due.
+        checkSoon = false
         if case .file(let url, _, true) = source, CGPreflightScreenCaptureAccess() {
-            let computed = Self.frameIndex(url, dark: false, solar: true, observed: false)
-            // Check every ten minutes while the desktop agrees with the computation, every minute
-            // while it doesn't (its next change can't be predicted then).
+            let now = Date()
+            let computed = Self.frameIndex(url, dark: false, solar: true, observed: false, at: now)
+            // The desktop changes image within some minutes of the computed moment, either side of it:
+            // look every few seconds then, so the bar follows within seconds rather than a minute. Same
+            // while the desktop doesn't agree with the computation (its next change can't be predicted).
             Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
             let trusted = seen == nil || seen!.url != url || seen!.frame == computed
-            let due = computed != lastComputedFrame || Date().timeIntervalSince(lastVerified) > (trusted ? 600 : 55)
+            let near = [-Self.nearChange, Self.nearChange].contains {
+                Self.frameIndex(url, dark: false, solar: true, observed: false, at: now.addingTimeInterval($0)) != computed
+            }
+            checkSoon = near || !trusted
+            let due = computed != lastComputedFrame || now.timeIntervalSince(lastVerified) > (checkSoon ? Self.soonInterval - 0.5 : 600)
             lastComputedFrame = computed
             if due {
                 lastVerified = Date()
@@ -392,7 +409,7 @@ final class WallpaperProvider {
     }
 
     /// Which image of a (possibly dynamic) HEIC the desktop shows.
-    static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true) -> Int {
+    static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true, at date: Date = Date()) -> Int {
         if solar && useObserved {
             observedLock.lock(); let seen = observed; observedLock.unlock()
             if let seen, seen.url == url { return seen.frame }
@@ -406,7 +423,7 @@ final class WallpaperProvider {
                   let b64 = CGImageMetadataTagCopyValue(tag) as? String, let data = Data(base64Encoded: b64) else { return nil }
             return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         }
-        if solar, let si = plist("solar")?["si"] as? [[String: Any]], let i = Solar.frame(si), i < count { return i }
+        if solar, let si = plist("solar")?["si"] as? [[String: Any]], let i = Solar.frame(si, at: date), i < count { return i }
         for tagName in ["apr", "solar", "h24"] {
             guard let p = plist(tagName) else { continue }
             let ap = (p["ap"] as? [String: Any]) ?? p
