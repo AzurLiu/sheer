@@ -68,4 +68,29 @@ else
   ditto -c -k --keepParent "$APP" dist/Sheer.zip
 fi
 codesign --verify --strict "$APP"
-echo "✅ built $APP$( (( DEV )) && echo ' (dev)' || echo ' and dist/Sheer.zip')"
+
+# Release builds also get Sheer.dmg: the familiar "drag Sheer onto Applications" window, for downloading by
+# hand. (The in-app updater keeps using Sheer.zip.) The window's layout is Packaging/dmg/DS_Store, written
+# by Finder itself (see Packaging/dmg/make_template.sh); the arrow between the icons is drawn in code. The
+# volume must be named "Sheer" and the arrow must sit at .background/arrow.tiff, where the layout points.
+if (( ! DEV )); then
+  STAGE=build/dmg
+  rm -rf "$STAGE" && mkdir -p "$STAGE/root/.background"
+  swiftc -O Packaging/dmg/arrow.swift -o "$STAGE/arrow"
+  "$STAGE/arrow" "$STAGE/arrow.png" 1
+  "$STAGE/arrow" "$STAGE/arrow@2x.png" 2
+  tiffutil -cathidpicheck "$STAGE/arrow.png" "$STAGE/arrow@2x.png" -out "$STAGE/root/.background/arrow.tiff" >/dev/null 2>&1
+  ditto "$APP" "$STAGE/root/Sheer.app"
+  ln -s /Applications "$STAGE/root/Applications"
+  cp Packaging/dmg/DS_Store "$STAGE/root/.DS_Store"
+  cp "$APP/Contents/Resources/AppIcon.icns" "$STAGE/root/.VolumeIcon.icns"
+  rm -f dist/Sheer.dmg
+  # Writable first, to flag the volume as having a custom icon (.VolumeIcon.icns), then compressed.
+  hdiutil create -quiet -volname Sheer -srcfolder "$STAGE/root" -fs HFS+ -format UDRW "$STAGE/rw.dmg"
+  MNT=$(hdiutil attach -nobrowse -noautoopen "$STAGE/rw.dmg" | awk -F'\t' '/\/Volumes\// { print $NF }')
+  SetFile -a C "$MNT" 2>/dev/null || true   # SetFile comes with the Command Line Tools
+  hdiutil detach -quiet "$MNT"
+  hdiutil convert -quiet "$STAGE/rw.dmg" -format UDZO -imagekey zlib-level=9 -o dist/Sheer.dmg
+  rm -rf "$STAGE"
+fi
+echo "✅ built $APP$( (( DEV )) && echo ' (dev)' || echo ' and dist/Sheer.zip, dist/Sheer.dmg')"

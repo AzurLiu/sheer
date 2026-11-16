@@ -38,8 +38,8 @@ Why it doesn't feel like an add-on:
 
 ### Download (no developer account needed on either side)
 
-1. Download `Sheer.zip` from the [latest release](../../releases/latest) and unzip it.
-2. Move **Sheer.app** to your **Applications** folder.
+1. Download `Sheer.dmg` from the [latest release](../../releases/latest) and open it.
+2. Drag **Sheer** onto the **Applications** folder in the window that opens. (`Sheer.zip` has the same app, if you prefer.)
 3. Open it. Sheer isn't notarized by Apple, so macOS blocks it the first time. Go to
    **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
    (Or run `xattr -dr com.apple.quarantine /Applications/Sheer.app` in Terminal.)
@@ -158,7 +158,7 @@ Chinese, then the install line, separated by `---`), then tag.
 
 ### 安装
 
-1. 从 [最新版本](../../releases/latest) 下载 `Sheer.zip` 并解压，把 **Sheer.app** 拖进「应用程序」。
+1. 从 [最新版本](../../releases/latest) 下载 `Sheer.dmg` 并打开，在弹出的窗口里把 **Sheer** 拖到「应用程序」上。（也可以下载内容相同的 `Sheer.zip`。）
 2. 打开它。因为没有经过苹果公证，第一次会被系统拦下：到 **系统设置 → 隐私与安全性**，在页面下方点 **仍要打开**。
    （也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Sheer.app`。）
 3. Sheer 会弹出授权窗口，列出它需要的权限，每项各有一个按钮：**辅助功能**（必需）和 **屏幕录制**（仅 Sequoia 等实时壁纸需要；Sequoia 是 macOS 15 的默认壁纸）。按提示授权后窗口会自动关闭。

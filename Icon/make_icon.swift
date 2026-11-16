@@ -31,9 +31,13 @@ func drawIcon(_ ctx: CGContext) {
     let body = CGRect(x: 100, y: 100, width: 824, height: 824)   // Apple 图标网格：824 主体 + 投影留白
     let shape = squircle(body, 185)
 
+    // Shadows are in device pixels, not scaled with the drawing: scale them by hand, or at small sizes the
+    // blur runs past the canvas and is cut off in a visible square around the icon.
+    // 投影的偏移和模糊不随坐标缩放，要手动乘上比例，否则小尺寸下投影超出画布、被裁成一圈方框
+    let k = ctx.userSpaceToDeviceSpaceTransform.a
     // 投影
     ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: color(0x000000, 0.28))
+    ctx.setShadow(offset: CGSize(width: 0, height: -12 * k), blur: 28 * k, color: color(0x000000, 0.28))
     ctx.addPath(shape); ctx.setFillColor(color(0x000000)); ctx.fillPath()
     ctx.restoreGState()
 
@@ -53,7 +57,7 @@ func drawIcon(_ ctx: CGContext) {
         let bar = CGRect(x: body.minX + 120, y: body.maxY - 250, width: body.width - 240, height: 96)
         let path = CGPath(roundedRect: bar, cornerWidth: 48, cornerHeight: 48, transform: nil)
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 30, color: color(0x000000, 0.45))
+        ctx.setShadow(offset: CGSize(width: 0, height: -10 * k), blur: 30 * k, color: color(0x000000, 0.45))
         ctx.addPath(path); ctx.setFillColor(color(0xFFFFFF, 0.32)); ctx.fillPath()
         ctx.restoreGState()
         ctx.saveGState()
