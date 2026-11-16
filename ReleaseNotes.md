@@ -1,5 +1,5 @@
-Fixed the menu bar sometimes showing a different shade of a Dynamic wallpaper than the desktop under it (for example a lighter sky than the wallpaper) on a Mac whose "Setting time zone" location service is switched off. Sheer now follows the position the desktop keeps, so the two change together.
+With a Dynamic wallpaper that changes with the sun, the menu bar now switches to the new image within a few seconds of the desktop, instead of lagging behind it for up to a minute.
 ---
-修复了在"设置时区"定位服务关闭的 Mac 上，菜单栏有时和桌面显示动态壁纸的不同一帧（例如菜单栏的天空比壁纸更亮）的问题。Sheer 现在会沿用桌面保留的位置，两者一起变化。
+使用随太阳变化的动态壁纸时，菜单栏现在会在桌面换图后几秒内跟着换，不再最多慢一分钟。
 ---
 Unzip, move Sheer.app to Applications, then open it. The first time, allow it under System Settings → Privacy & Security → Open Anyway.
