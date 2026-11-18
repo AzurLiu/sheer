@@ -51,11 +51,12 @@ final class WallpaperProvider {
     /// computation): the caller should fetch every few seconds instead of every minute.
     private(set) var checkSoon = false
 
-    /// How close to a computed frame change counts as "near" (the desktop's own position for the sun
-    /// can differ from Sheer's, which moves its change by some minutes either way).
-    private static let nearChange: TimeInterval = 15 * 60
+    /// How close to a frame change, at any of the positions the desktop may be using, counts as "near".
+    private static let nearChange: TimeInterval = 10 * 60
     /// How often to look at the desktop while a change may be due.
     private static let soonInterval: TimeInterval = 5
+    /// How often to look at it otherwise (the desktop may still be using a position nobody predicted).
+    private static let idleInterval: TimeInterval = 3 * 60
 
     /// Wallpaper strip covering the top `barHeight` points of the screen, in pixels.
     /// nil means it can't be obtained accurately — the caller then shows the system menu bar
@@ -77,22 +78,27 @@ final class WallpaperProvider {
         // A sun-following wallpaper: the computed frame is right as long as the desktop works from the
         // inputs Sheer can see. It doesn't always (it keeps a position it was once given, for one), so
         // with Screen Recording allowed, look at which image the desktop actually shows: a tiny
-        // capture, when the computed frame changes, every ten minutes, and every few seconds while
+        // capture, when the computed frame changes, every few minutes, and every few seconds while
         // the desktop's change may be due.
         checkSoon = false
         if case .file(let url, _, true) = source, CGPreflightScreenCaptureAccess() {
             let now = Date()
             let computed = Self.frameIndex(url, dark: false, solar: true, observed: false, at: now)
-            // The desktop changes image within some minutes of the computed moment, either side of it:
-            // look every few seconds then, so the bar follows within seconds rather than a minute. Same
-            // while the desktop doesn't agree with the computation (its next change can't be predicted).
+            // Which position the desktop times its frames by can't always be known, so look every few
+            // seconds whenever any of the candidates is within minutes of a change: the bar then follows
+            // within seconds whichever it is. Same while the desktop doesn't agree with the computation.
             Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
             let trusted = seen == nil || seen!.url != url || seen!.frame == computed
-            let near = [-Self.nearChange, Self.nearChange].contains {
-                Self.frameIndex(url, dark: false, solar: true, observed: false, at: now.addingTimeInterval($0)) != computed
+            let near = Solar.candidates.contains { place in
+                let at = { (dt: TimeInterval) in
+                    Self.frameIndex(url, dark: false, solar: true, observed: false, at: now.addingTimeInterval(dt), place: place)
+                }
+                let here = at(0)
+                return at(-Self.nearChange) != here || at(Self.nearChange) != here
             }
             checkSoon = near || !trusted
-            let due = computed != lastComputedFrame || now.timeIntervalSince(lastVerified) > (checkSoon ? Self.soonInterval - 0.5 : 600)
+            let due = computed != lastComputedFrame
+                || now.timeIntervalSince(lastVerified) > (checkSoon ? Self.soonInterval - 0.5 : Self.idleInterval)
             lastComputedFrame = computed
             if due {
                 lastVerified = Date()
@@ -492,7 +498,8 @@ final class WallpaperProvider {
     }
 
     /// Which image of a (possibly dynamic) HEIC the desktop shows.
-    static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true, at date: Date = Date()) -> Int {
+    static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true, at date: Date = Date(),
+                           place: (lat: Double, lon: Double)? = nil) -> Int {
         if solar && useObserved {
             observedLock.lock(); let seen = observed; observedLock.unlock()
             if let seen, seen.url == url { return seen.frame }
@@ -506,7 +513,7 @@ final class WallpaperProvider {
                   let b64 = CGImageMetadataTagCopyValue(tag) as? String, let data = Data(base64Encoded: b64) else { return nil }
             return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         }
-        if solar, let si = plist("solar")?["si"] as? [[String: Any]], let i = Solar.frame(si, at: date), i < count { return i }
+        if solar, let si = plist("solar")?["si"] as? [[String: Any]], let i = Solar.frame(si, at: date, place: place), i < count { return i }
         for tagName in ["apr", "solar", "h24"] {
             guard let p = plist(tagName) else { continue }
             let ap = (p["ap"] as? [String: Any]) ?? p
@@ -521,14 +528,15 @@ final class WallpaperProvider {
 /// and eight places, with no difference): the listed image nearest in altitude to the sun, among
 /// those listed for the same half of the day (sun rising: azimuth below 180°).
 enum Solar {
-    static func frame(_ si: [[String: Any]], at date: Date = Date()) -> Int? {
+    /// `place`: where to stand instead of `location` (to see when another candidate position changes frame).
+    static func frame(_ si: [[String: Any]], at date: Date = Date(), place: (lat: Double, lon: Double)? = nil) -> Int? {
         let entries: [(a: Double, z: Double, i: Int)] = si.compactMap {
             guard let a = ($0["a"] as? NSNumber)?.doubleValue, let z = ($0["z"] as? NSNumber)?.doubleValue,
                   let i = ($0["i"] as? NSNumber)?.intValue else { return nil }
             return (a, z, i)
         }
         guard !entries.isEmpty else { return nil }
-        let loc = location
+        let loc = place ?? location
         let sun = systemPosition(date, lat: loc.lat, lon: loc.lon) ?? position(date, lat: loc.lat, lon: loc.lon)
         let half = entries.filter { ($0.z < 180) == (sun.az < 180) }
         return (half.isEmpty ? entries : half).min { abs($0.a - sun.alt) < abs($1.a - sun.alt) }?.i
@@ -536,15 +544,28 @@ enum Solar {
 
     /// Where the desktop places the sun's observer. Allowed to use Location Services (the "Setting
     /// time zone" system service), it takes the Mac's real position: Sheer uses the same once it has
-    /// been allowed to (see Location), and until then the time zone's city stands in. Otherwise the
-    /// desktop itself falls back to a point on the equator at the time zone's meridian (standard
-    /// offset × Earth's rotation rate), reproduced exactly here.
+    /// been allowed to (see Location), and until then the time zone's city stands in.
+    /// With the service off, the desktop was seen standing at the time zone's city (a Mac set to
+    /// America/Regina but actually near Edmonton changed frames on Regina's times, minutes to half an hour
+    /// away from Edmonton's or the meridian point's, on two days). The other candidates still decide
+    /// when Sheer looks at the desktop closely (see `candidates`).
     static var location: (lat: Double, lon: Double) {
         if desktopUsesRealLocation, let place = Location.shared.coordinate ?? zoneCity { return place }
-        // The service is off. A desktop that once had a real position keeps it (the time zone's meridian
-        // below is only for a Mac that never had one), and Sheer only holds a position if it was given
-        // one while the service was on: use it.
-        if let kept = Location.shared.lastKnown { return kept }
+        return zoneCity ?? meridianPoint
+    }
+
+    /// Every position the desktop might be timing its frames by: the one Sheer computes with, the Mac's
+    /// last known real position (a desktop may keep it after the service is switched off), the time
+    /// zone's city, and the equator at the time zone's meridian (standard offset × Earth's rotation rate).
+    static var candidates: [(lat: Double, lon: Double)] {
+        var all: [(lat: Double, lon: Double)] = [location]
+        for p in [Location.shared.lastKnown, zoneCity, meridianPoint] {
+            if let p, !all.contains(where: { abs($0.lat - p.lat) < 0.01 && abs($0.lon - p.lon) < 0.01 }) { all.append(p) }
+        }
+        return all
+    }
+
+    private static var meridianPoint: (lat: Double, lon: Double) {
         let zone = TimeZone.current
         let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()
         return (0, standardOffset * 7.292115e-5 * 180 / .pi)
