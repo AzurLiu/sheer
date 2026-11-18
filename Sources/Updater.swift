@@ -176,12 +176,12 @@ final class UpdateChecker {
     }
 
     /// Release notes are written as "English\n---\n中文\n---\ninstall instructions": pick the reader's part.
-    static func localized(_ body: String?) -> String? {
+    static func localized(_ body: String?,
+                          chinese: Bool = Locale.preferredLanguages.first?.hasPrefix("zh") == true) -> String? {
         guard let body else { return nil }
         let parts = body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n---\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard parts.count >= 3 else { return nil }   // older releases only carry the install instructions
-        let chinese = Locale.preferredLanguages.first?.hasPrefix("zh") == true
         let text = String(parts[chinese ? 1 : 0].prefix(600))
         return text.isEmpty ? nil : text
     }

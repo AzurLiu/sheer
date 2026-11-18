@@ -89,12 +89,8 @@ final class WallpaperProvider {
             // within seconds whichever it is. Same while the desktop doesn't agree with the computation.
             Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
             let trusted = seen == nil || seen!.url != url || seen!.frame == computed
-            let near = Solar.candidates.contains { place in
-                let at = { (dt: TimeInterval) in
-                    Self.frameIndex(url, dark: false, solar: true, observed: false, at: now.addingTimeInterval(dt), place: place)
-                }
-                let here = at(0)
-                return at(-Self.nearChange) != here || at(Self.nearChange) != here
+            let near = Self.changeIsNear(at: now, places: Solar.candidates) { date, place in
+                Self.frameIndex(url, dark: false, solar: true, observed: false, at: date, place: place)
             }
             checkSoon = near || !trusted
             let due = computed != lastComputedFrame
@@ -121,6 +117,16 @@ final class WallpaperProvider {
     }
 
     func invalidate() { queue.async { self.fileCache.removeAll() }; lastVerified = .distantPast }
+
+    /// Whether, standing at any of `places`, the image changes within `nearChange` of `now` (either side).
+    /// `frame` gives the image shown at a moment and place. Kept apart from `strip` for the tests.
+    static func changeIsNear(at now: Date, places: [(lat: Double, lon: Double)],
+                             frame: (Date, (lat: Double, lon: Double)) -> Int) -> Bool {
+        places.contains { place in
+            let here = frame(now, place)
+            return frame(now.addingTimeInterval(-nearChange), place) != here || frame(now.addingTimeInterval(nearChange), place) != here
+        }
+    }
 
     // MARK: Which image a Dynamic wallpaper shows
 
@@ -317,7 +323,8 @@ final class WallpaperProvider {
 
     // MARK: Resolving the wallpaper from the system store
 
-    static let storeIndexURL = FileManager.default.homeDirectoryForCurrentUser
+    /// `var` only so the tests can point it at a sample store.
+    static var storeIndexURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist")
     private static let systemPictures = URL(fileURLWithPath: "/System/Library/Desktop Pictures")
 

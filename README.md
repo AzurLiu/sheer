@@ -65,6 +65,10 @@ open build/Sheer.app
 
 An app you build yourself isn't quarantined, so Gatekeeper won't block it.
 
+`./test.sh` runs the tests (Tests/main.swift): the sun and Dynamic-wallpaper timing, reading the system's
+wallpaper settings, update version checks and the legibility gradient. The release workflow runs them
+before building, and a failure stops the release.
+
 ## Permissions
 
 | Permission | Why | When |

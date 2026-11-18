@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A failing test stops here: nothing is built, uploaded or released.
+      - name: Run tests
+        run: ./test.sh
+
       - name: Build Sheer.app (universal, release)
         # Signed with Sheer's own certificate when the secrets are there (see build.sh); ad-hoc otherwise.
         env:
