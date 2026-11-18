@@ -41,3 +41,8 @@
 "update.fail.download" = "The download didn't finish.";
 "update.fail.check" = "The download isn't a Sheer release signed by its developer.";
 "update.fail.replace" = "Sheer couldn't replace itself in its folder.";
+"menu.check-updates" = "Check for Updates…";
+"alert.up-to-date.title" = "Sheer is up to date";
+"alert.up-to-date.body" = "Version %@ is the newest.";
+"alert.check-failed.title" = "Couldn't check for updates";
+"alert.check-failed.body" = "GitHub couldn't be reached. Check your internet connection and try again.";

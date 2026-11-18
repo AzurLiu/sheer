@@ -57,7 +57,7 @@ extension AppController {
 
         guard CGPreflightScreenCaptureAccess(), let screen = NSScreen.screens.first else { return }
         let own = Set(overlays.values.flatMap { [CGWindowID($0.windowNumber), CGWindowID($0.scrim.windowNumber)] })
-        if #unavailable(macOS 14) {
+        guard #available(macOS 14, *) else {
             for (name, excluded) in [("on", Set<CGWindowID>()), ("off", own)] {
                 Debug.write(Self.legacySnapshot(screen.displayID, excluding: excluded), "selfcheck-\(name).png")
             }
@@ -74,7 +74,6 @@ extension AppController {
                     cfg.width = display.width * 2
                     cfg.height = 240
                     cfg.showsCursor = false
-                    guard #available(macOS 14, *) else { return }
                     let img = try await SCScreenshotManager.captureImage(
                         contentFilter: SCContentFilter(display: display, excludingWindows: excluded), configuration: cfg)
                     Debug.write(img, "selfcheck-\(name).png")

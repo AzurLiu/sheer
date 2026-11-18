@@ -75,6 +75,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dnc.addObserver(self, selector: #selector(testClick(_:)), name: NSNotification.Name("sheer.test-click"), object: nil)
         dnc.addObserver(self, selector: #selector(testFollow(_:)), name: NSNotification.Name("sheer.test-follow"), object: nil)
         dnc.addObserver(self, selector: #selector(testUpdate), name: NSNotification.Name("sheer.test-update"), object: nil)
+        dnc.addObserver(self, selector: #selector(checkForUpdates), name: NSNotification.Name("sheer.test-check"), object: nil)
         #endif
         watchWallpaperStore()
         observeDock()
@@ -124,14 +125,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let a = NSAlert()
         a.messageText = title
         a.informativeText = body
+        #if SHEER_DEBUG
+        // With `testUpdateButton` set (see announceUpdate), plain alerts close themselves after 2 s too.
+        if UserDefaults.standard.object(forKey: "testUpdateButton") != nil {
+            let t = Timer(timeInterval: 2, repeats: false) { _ in a.buttons.first?.performClick(nil) }
+            RunLoop.main.add(t, forMode: .common)
+        }
+        #endif
         a.runModal()
     }
 
     /// A newer version: say so once per version, with what it changes. The menu item and the dot on
     /// the status icon stay for those who choose Later.
-    private func announceUpdate() {
+    /// `force`: show it even if this version was announced before (the user asked).
+    private func announceUpdate(force: Bool = false) {
         guard let version = updates.available,
-              UserDefaults.standard.string(forKey: "announcedVersion") != version else { return }
+              force || UserDefaults.standard.string(forKey: "announcedVersion") != version else { return }
         UserDefaults.standard.set(version, forKey: "announcedVersion")
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
@@ -150,6 +159,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let download = a.runModal() == .alertFirstButtonReturn
         Debug.write("\(Date()) update alert for \(version): \(download ? "download" : "later")\n", "update-alert.txt")
         if download { installUpdate() }
+    }
+
+    /// "Check for Updates…": ask GitHub now and always say what came of it.
+    @objc private func checkForUpdates() {
+        let announcedBefore = UserDefaults.standard.string(forKey: "announcedVersion")
+        updates.checkNow { [weak self] ok in
+            guard let self else { return }
+            guard ok else {
+                self.alert(L("alert.check-failed.title"), L("alert.check-failed.body"))
+                return
+            }
+            if updates.available != nil {
+                // A version not announced before was just announced by the regular path (onChange);
+                // one announced earlier is shown again, since the user asked.
+                if UserDefaults.standard.string(forKey: "announcedVersion") == announcedBefore { announceUpdate(force: true) }
+            } else {
+                alert(L("alert.up-to-date.title"), String(format: L("alert.up-to-date.body"), updates.currentVersion))
+            }
+        }
     }
 
     /// Update in place when Sheer can (see Updater.swift), otherwise open the download page.
@@ -286,6 +314,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if #available(macOS 13, *) {
             add(L("menu.launch-at-login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         }
+        // While an update is waiting, its own item ("Update Available…") takes this place.
+        if updates.available == nil { add(L("menu.check-updates"), #selector(checkForUpdates)) }
         add(L("menu.about"), #selector(showAbout))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))

@@ -41,3 +41,8 @@
 "update.fail.download" = "下載沒有完成。";
 "update.fail.check" = "下載到的不是開發者簽名的 Sheer 正式版。";
 "update.fail.replace" = "Sheer 沒辦法替換所在資料夾裡的舊版本。";
+"menu.check-updates" = "檢查更新…";
+"alert.up-to-date.title" = "Sheer 已是最新版本";
+"alert.up-to-date.body" = "%@ 是目前最新的版本。";
+"alert.check-failed.title" = "無法檢查更新";
+"alert.check-failed.body" = "連不上 GitHub。請檢查網路後再試一次。";

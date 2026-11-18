@@ -51,14 +51,19 @@ final class UpdateChecker {
     private var api: URL { Self.api }
     #endif
 
-    func checkNow() {
+    /// Ask GitHub now. `done` (on the main thread, after `available` is updated) says whether the check
+    /// got an answer; the menu's "Check for Updates…" uses it to report the result.
+    func checkNow(done: ((Bool) -> Void)? = nil) {
         var req = URLRequest(url: api, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("Sheer", forHTTPHeaderField: "User-Agent")
         URLSession(configuration: .ephemeral).dataTask(with: req) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200 || Self.isTestFile(response), let data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tag = json["tag_name"] as? String else { return }   // offline etc.: try again next hour
+                  let tag = json["tag_name"] as? String else {   // offline etc.: try again next hour
+                DispatchQueue.main.async { done?(false) }
+                return
+            }
             let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -69,9 +74,13 @@ final class UpdateChecker {
                 self.defaults.set(asset?["browser_download_url"] as? String, forKey: "latestAsset")
                 Debug.write("\(Date()) latest=\(version) current=\(self.current)\n", "update.txt")
                 self.apply(version)
+                done?(true)
             }
         }.resume()
     }
+
+    /// The running version, for "you're up to date".
+    var currentVersion: String { current }
 
     // MARK: Updating in place
 
