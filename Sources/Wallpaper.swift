@@ -51,10 +51,12 @@ final class WallpaperProvider {
     /// computation): the caller should fetch every few seconds instead of every minute.
     private(set) var checkSoon = false
 
-    /// How close to a frame change, at any of the positions the desktop may be using, counts as "near".
-    private static let nearChange: TimeInterval = 10 * 60
-    /// How often to look at the desktop while a change may be due.
-    private static let soonInterval: TimeInterval = 5
+    /// How close to a computed frame change counts as "near" (the desktop was seen changing up to a few
+    /// minutes either side of Sheer's computation).
+    private static let nearChange: TimeInterval = 5 * 60
+    /// How often to look at the desktop while a change may be due. Each look is a screen capture, which
+    /// macOS shows as screen recording: keep them few (about 10 minutes of them per change).
+    static let soonInterval: TimeInterval = 10
     /// How often to look at it otherwise (the desktop may still be using a position nobody predicted).
     private static let idleInterval: TimeInterval = 3 * 60
 
@@ -84,12 +86,13 @@ final class WallpaperProvider {
         if case .file(let url, _, true) = source, CGPreflightScreenCaptureAccess() {
             let now = Date()
             let computed = Self.frameIndex(url, dark: false, solar: true, observed: false, at: now)
-            // Which position the desktop times its frames by can't always be known, so look every few
-            // seconds whenever any of the candidates is within minutes of a change: the bar then follows
-            // within seconds whichever it is. Same while the desktop doesn't agree with the computation.
+            // Look every few seconds within minutes of a computed change, and while the desktop doesn't
+            // agree with the computation. Only Sheer's own position is watched closely: watching every
+            // position the desktop might use (last known, meridian) meant ~6 hours of captures a day.
+            // Should the desktop use another, the every-few-minutes look still catches it.
             Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
             let trusted = seen == nil || seen!.url != url || seen!.frame == computed
-            let near = Self.changeIsNear(at: now, places: Solar.candidates) { date, place in
+            let near = Self.changeIsNear(at: now, places: [Solar.location]) { date, place in
                 Self.frameIndex(url, dark: false, solar: true, observed: false, at: date, place: place)
             }
             checkSoon = near || !trusted
@@ -554,24 +557,14 @@ enum Solar {
     /// been allowed to (see Location), and until then the time zone's city stands in.
     /// With the service off, the desktop was seen standing at the time zone's city (a Mac set to
     /// America/Regina but actually near Edmonton changed frames on Regina's times, minutes to half an hour
-    /// away from Edmonton's or the meridian point's, on two days). The other candidates still decide
-    /// when Sheer looks at the desktop closely (see `candidates`).
+    /// away from Edmonton's or the meridian point's, on two days).
     static var location: (lat: Double, lon: Double) {
         if desktopUsesRealLocation, let place = Location.shared.coordinate ?? zoneCity { return place }
         return zoneCity ?? meridianPoint
     }
 
-    /// Every position the desktop might be timing its frames by: the one Sheer computes with, the Mac's
-    /// last known real position (a desktop may keep it after the service is switched off), the time
-    /// zone's city, and the equator at the time zone's meridian (standard offset × Earth's rotation rate).
-    static var candidates: [(lat: Double, lon: Double)] {
-        var all: [(lat: Double, lon: Double)] = [location]
-        for p in [Location.shared.lastKnown, zoneCity, meridianPoint] {
-            if let p, !all.contains(where: { abs($0.lat - p.lat) < 0.01 && abs($0.lon - p.lon) < 0.01 }) { all.append(p) }
-        }
-        return all
-    }
-
+    /// The equator at the time zone's meridian (standard offset × Earth's rotation rate): the last resort
+    /// when the zone has no city.
     private static var meridianPoint: (lat: Double, lon: Double) {
         let zone = TimeZone.current
         let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()

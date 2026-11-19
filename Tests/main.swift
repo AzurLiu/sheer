@@ -72,7 +72,6 @@ do {
     if TimeZone.current.identifier == "America/Regina" && !Solar.desktopUsesRealLocation {
         let p = Solar.location
         check(abs(p.lat - reginaCity.lat) < 0.01 && abs(p.lon - reginaCity.lon) < 0.01, "location off → the time zone's city (got \(p))")
-        check(Solar.candidates.count >= 2, "the other candidate positions are watched too")
     } else {
         print("  (skipped: needs TZ=America/Regina and the time-zone location service off)")
     }
@@ -83,16 +82,17 @@ do {
     let near = { (d: Date, places: [(lat: Double, lon: Double)]) in
         WallpaperProvider.changeIsNear(at: d, places: places) { date, place in ventFrame(date, place) }
     }
-    // Tue 17 Nov 18:59, the desktop changing to image 1 any moment: watched, whichever position is right.
+    // Tue 17 Nov 18:59, the desktop changing to image 1 any moment (seen by 19:00): watched.
     check(near(local(2026, 11, 17, 18, 59), [reginaCity]), "18:59 near Regina's 19:03 change")
-    check(near(local(2026, 11, 17, 18, 59), [reginaCity, edmonton, meridian]), "18:59 with all candidates")
-    // 18:30: Regina's changes (17:41, 19:03) are both over 10 minutes away.
-    check(!near(local(2026, 11, 17, 18, 30), [reginaCity]), "18:30 not near for Regina alone")
-    // …but the meridian point changes at 19:00: with it among the candidates, 18:50 is watched.
-    check(near(local(2026, 11, 17, 18, 50), [reginaCity, meridian]), "18:50 near the meridian point's change")
-    // Midday, over an hour from every candidate's change (Regina 11:09/14:17, Edmonton 09:51/16:45,
-    // meridian 06:58/16:30): no fast watching.
-    check(!near(local(2026, 11, 17, 12, 30), [reginaCity, edmonton, meridian]), "12:30 not near any change")
+    // 18:50: Regina's changes (17:41, 19:03) are both over 5 minutes away.
+    check(!near(local(2026, 11, 17, 18, 50), [reginaCity]), "18:50 not near")
+    check(!near(local(2026, 11, 17, 18, 30), [reginaCity]), "18:30 not near")
+    // Midday, over an hour from every change (Regina 11:09/14:17): no fast watching.
+    check(!near(local(2026, 11, 17, 12, 30), [reginaCity]), "12:30 not near")
+    // Each close look is a screen capture: the fast-watched part of a day stays short (8 changes ≈ 80 min).
+    var watched = 0
+    for m in 0..<1440 where near(local(2026, 11, 18, 0, 0).addingTimeInterval(Double(m) * 60), [reginaCity]) { watched += 1 }
+    check(watched <= 100, "minutes a day watched closely: \(watched)")
 }
 
 // MARK: - Updates

@@ -31,14 +31,6 @@ final class Location: NSObject, CLLocationManagerDelegate {
     }
     private var allowed = false
 
-    /// The last position Sheer was ever given, kept even after Location Services is switched off.
-    /// A desktop whose time-zone service was switched off keeps the position it had then, so this is
-    /// the best stand-in for it. Safe from any thread.
-    var lastKnown: (lat: Double, lon: Double)? {
-        lock.lock(); defer { lock.unlock() }
-        return stored
-    }
-
     var isAuthorized: Bool { Self.authorized(manager.authorizationStatus) }
     /// The user hasn't been asked yet (asking again after a refusal does nothing).
     var isUndetermined: Bool { manager.authorizationStatus == .notDetermined }
