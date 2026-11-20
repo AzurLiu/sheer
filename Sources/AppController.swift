@@ -52,7 +52,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let button = statusItem.button {
             // The menu bar's appearance (light/dark text) follows the wallpaper; status items report it.
             observations.append(button.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
-                DispatchQueue.main.async { self?.syncAppearance(); self?.reloadWallpapers() }
+                DispatchQueue.main.async { self?.syncAppearance(); self?.reloadWallpapers(); DesktopLog.shared.readSoon() }
             })
         }
 
@@ -84,7 +84,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updates.onChange = { [weak self] in self?.updateStatusIcon(); self?.announceUpdate() }
         updates.start()
         if !AXIsProcessTrusted() { showSetup() }
-        Location.shared.onChange = { [weak self] in self?.reloadWallpapers() }
+        Location.shared.onChange = { [weak self] in self?.reloadWallpapers(); DesktopLog.shared.readSoon() }
+        // A sun-following wallpaper: the desktop's own notes say which image it shows, and when it
+        // chooses again. It also chooses anew when the clock or the time zone changes.
+        DesktopLog.shared.onChange = { [weak self] in self?.reloadWallpapers() }
+        wallpapers.onLookAgain = { [weak self] in self?.reloadWallpapers() }
+        for name in [NSNotification.Name.NSSystemClockDidChange, NSNotification.Name.NSSystemTimeZoneDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                DesktopLog.shared.readSoon(); self?.reloadWallpapers()
+            }
+        }
         Location.shared.start()
 
         rebuildOverlays()
@@ -379,6 +388,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Debug.append(String(format: "%.3f wakeUp\n", Date().timeIntervalSince1970), "vis.txt")
         #endif
         retrySupport()
+        DesktopLog.shared.readSoon()
         rebuildOverlays()   // its wallpaper reload waits for quietUntil
         mirrorWhileSettling()
     }
@@ -414,6 +424,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.reloadWallpapers() }
     }
     @objc private func wallpaperChanged() {
+        DesktopLog.shared.readSoon()
         wallpapers.invalidate(); reloadWallpapers()
         for delay in [1.0, 3.0] {   // the system crossfades wallpapers; fetch again once it settles
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -548,8 +559,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     private var askedForRecording = false
     private var askedForLocation = false
-    /// A sun-following wallpaper, on a Mac whose desktop places the sun by Location Services.
-    private var sunNeedsLocation: Bool { wallpapers.followsSun && Solar.desktopUsesRealLocation }
+    /// A sun-following wallpaper, on a Mac whose desktop places the sun by Location Services, and
+    /// without the desktop's own notes to go by (with them Sheer needn't know where the Mac is).
+    private var sunNeedsLocation: Bool {
+        wallpapers.followsSun && !wallpapers.notedByDesktop && DesktopLog.shared.settled && Solar.desktopUsesRealLocation
+    }
 
     private func applyTitles() {
         let items = reader.items
@@ -759,8 +773,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick += 1
         let period = wallpapers.needsCapture ? 300 : 900   // live/dynamic wallpapers change over time
         if tick % period == 0 { wallpapers.invalidate(); reloadWallpapers() }
-        // Redraws only if the frame changed. Every few seconds while the desktop's change may be due.
-        else if wallpapers.followsSun && tick % (wallpapers.checkSoon ? Int(WallpaperProvider.soonInterval) : 60) == 0 { reloadWallpapers() }
+        // A look at the desktop each minute; it redraws only if the image changed. (The desktop's own
+        // notes bring changes in at once: see DesktopLog.)
+        else if wallpapers.followsSun && tick % 60 == 0 { reloadWallpapers() }
         if tick % 600 == 0 { retrySupport() }
         if tick % 30 == 0 { observeDock() }
         if tick % 5 == 0 { placeInSpaces() }

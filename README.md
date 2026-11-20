@@ -99,7 +99,7 @@ Placing the window between those two levels uses a private SkyLight call. If a m
 - Tested on a MacBook with a notch (37 pt menu bar). Metrics for 24 pt menu bars and multi-display setups are derived, not yet verified — reports welcome.
 - Apps that show icons instead of text in their menu titles fall back to the normal menu bar while they're frontmost.
 - The light-mode selection highlight colour is an estimate.
-- Dynamic wallpapers change frame at the same moment as the desktop. With Screen Recording allowed, Sheer also checks now and then which image the desktop really shows, which covers the cases it can't work out (macOS keeps using a position it was given after location is switched off, for one). If *Setting time zone* is allowed to use Location Services, the desktop times them by where the Mac is, and Sheer offers to use the same position; decline, and it estimates from the time zone's city, so frames may change a few minutes apart.
+- Dynamic wallpapers change image when the desktop does. macOS notes each choice in its own log, and Sheer reads that to know the moment (this takes an administrator account, and a macOS that keeps these notes: macOS 15 does); otherwise it computes the moment from the sun's position. With Screen Recording allowed, it also looks at the desktop's picture to see which image is really there, because macOS can keep the old image for a while after choosing the next (seen with an app in full screen). That look reads the wallpaper's own window, not the screen, and macOS doesn't show it as screen recording. If *Setting time zone* is allowed to use Location Services, the desktop times images by where the Mac is, and Sheer offers to use the same position for its own computation.
 
 ### On macOS 11 to 13
 
@@ -195,4 +195,4 @@ Sheer 现在可以在 macOS 11 Big Sur、12 Monterey 和 13 Ventura 上运行，
 
 - 只在刘海屏 MacBook（37pt 菜单栏）上实测过；普通 24pt 菜单栏和多显示器的效果是推算的。
 - 菜单标题是图标而不是文字的应用，在前台时会退回系统原生菜单栏。
-- 动态壁纸与桌面同一时刻换帧。如果允许了屏幕录制，Sheer 还会不时核对桌面实际显示的是哪一张，覆盖它推算不出来的情况（比如关掉定位后，系统仍沿用之前拿到的位置）。如果「设置时区」被允许使用定位服务，桌面会按这台 Mac 的位置计时，Sheer 会询问能否使用同一位置；不允许的话，它按时区所在城市估算，换帧可能相差几分钟。
+- 动态壁纸跟随桌面换图。macOS 每次换图都会记在系统日志里，Sheer 读取这条记录来知道换图时刻（需要管理员账户，并且系统要有这条记录：macOS 15 有）；否则按太阳位置自己推算。允许了屏幕录制时，Sheer 还会看一眼桌面图片，确认实际显示的是哪一张：macOS 有时选好了下一张却还显示旧图（有应用全屏时见过）。这一眼读的是壁纸自己的窗口，不是屏幕，macOS 不会把它显示为屏幕录制。如果「设置时区」被允许使用定位服务，桌面会按这台 Mac 的位置计时，Sheer 会询问能否使用同一位置来推算。

@@ -47,18 +47,11 @@ final class WallpaperProvider {
     private(set) var needsCapture = false
     /// A Dynamic wallpaper following the sun: its frame changes through the day.
     private(set) var followsSun = false
-    /// The desktop may change image any moment (near a computed change, or out of step with the
-    /// computation): the caller should fetch every few seconds instead of every minute.
-    private(set) var checkSoon = false
-
-    /// How close to a computed frame change counts as "near" (the desktop was seen changing up to a few
-    /// minutes either side of Sheer's computation).
-    private static let nearChange: TimeInterval = 5 * 60
-    /// How often to look at the desktop while a change may be due. Each look is a screen capture, which
-    /// macOS shows as screen recording: keep them few (about 10 minutes of them per change).
-    static let soonInterval: TimeInterval = 10
-    /// How often to look at it otherwise (the desktop may still be using a position nobody predicted).
-    private static let idleInterval: TimeInterval = 3 * 60
+    /// The desktop's own notes say which image the sun-following wallpaper shows (see DesktopLog).
+    private(set) var notedByDesktop = false
+    /// Called on the main thread a moment after a look found the desktop not (yet) showing the image
+    /// it was expected to: time to look again.
+    var onLookAgain: (() -> Void)?
 
     /// Wallpaper strip covering the top `barHeight` points of the screen, in pixels.
     /// nil means it can't be obtained accurately — the caller then shows the system menu bar
@@ -77,33 +70,41 @@ final class WallpaperProvider {
             }
         }
 
-        // A sun-following wallpaper: the computed frame is right as long as the desktop works from the
-        // inputs Sheer can see. It doesn't always (it keeps a position it was once given, for one), so
-        // with Screen Recording allowed, look at which image the desktop actually shows: a tiny
-        // capture, when the computed frame changes, every few minutes, and every few seconds while
-        // the desktop's change may be due.
-        checkSoon = false
-        if case .file(let url, _, true) = source, CGPreflightScreenCaptureAccess() {
+        // A sun-following wallpaper. Which image the desktop means to show comes from its own notes
+        // (see DesktopLog), or, where those can't be had, from Sheer's own computation (see Solar).
+        // What it does show can lag behind that: with an app in full screen the desktop has been seen
+        // to keep the old image for half an hour after choosing the next. So Sheer also looks at the
+        // desktop's picture (see `look`) and shows what is there.
+        DesktopLog.shared.wanted = followsSun
+        notedByDesktop = false
+        if case .file(let url, _, true) = source {
             let now = Date()
             let computed = Self.frameIndex(url, dark: false, solar: true, observed: false, at: now)
-            // Look every few seconds within minutes of a computed change, and while the desktop doesn't
-            // agree with the computation. Only Sheer's own position is watched closely: watching every
-            // position the desktop might use (last known, meridian) meant ~6 hours of captures a day.
-            // Should the desktop use another, the every-few-minutes look still catches it.
-            Self.observedLock.lock(); let seen = Self.observed; Self.observedLock.unlock()
-            let trusted = seen == nil || seen!.url != url || seen!.frame == computed
-            let near = Self.changeIsNear(at: now, places: [Solar.location]) { date, place in
-                Self.frameIndex(url, dark: false, solar: true, observed: false, at: date, place: place)
-            }
-            checkSoon = near || !trusted
-            let due = computed != lastComputedFrame
-                || now.timeIntervalSince(lastVerified) > (checkSoon ? Self.soonInterval - 0.5 : Self.idleInterval)
+            if lastComputedFrame >= 0 && computed != lastComputedFrame { DesktopLog.shared.read() }   // the desktop is choosing about now too
             lastComputedFrame = computed
-            if due {
-                lastVerified = Date()
-                verifyFrame(url: url, screen: screen) { decode("file \(source)") }
+            let noted = Self.notedFrame(url)
+            notedByDesktop = noted != nil
+            let expected = noted ?? computed
+            if expected != lastExpected { lastExpected = expected; expectedSince = now }
+            if CGPreflightScreenCaptureAccess() {
+                // Reloads come in bursts: one look serves them.
+                if let last = lastLook[screen.displayID], now.timeIntervalSince(last) < 1 { decode("file \(source)"); return }
+                lastLook[screen.displayID] = now
+                look(url: url, screen: screen) { [weak self] seen in
+                    decode("file \(source)")
+                    // Not showing the expected image just after it became the expected one: the desktop
+                    // may be a moment behind, or in the middle of changing. Look again shortly. (After
+                    // that, the next look is the next reload's: a minute at most.)
+                    guard let self, seen != expected, Date().timeIntervalSince(self.expectedSince) < 10, !self.lookAgainPending else { return }
+                    self.lookAgainPending = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.lookAgainPending = false
+                        self?.onLookAgain?()
+                    }
+                }
                 return
             }
+            Self.observedLock.lock(); Self.observed = nil; Self.observedLock.unlock()
         }
 
         if needsCapture && CGPreflightScreenCaptureAccess() {
@@ -119,70 +120,64 @@ final class WallpaperProvider {
         }
     }
 
-    func invalidate() { queue.async { self.fileCache.removeAll() }; lastVerified = .distantPast }
-
-    /// Whether, standing at any of `places`, the image changes within `nearChange` of `now` (either side).
-    /// `frame` gives the image shown at a moment and place. Kept apart from `strip` for the tests.
-    static func changeIsNear(at now: Date, places: [(lat: Double, lon: Double)],
-                             frame: (Date, (lat: Double, lon: Double)) -> Int) -> Bool {
-        places.contains { place in
-            let here = frame(now, place)
-            return frame(now.addingTimeInterval(-nearChange), place) != here || frame(now.addingTimeInterval(nearChange), place) != here
-        }
+    /// Forget the decoded wallpaper.
+    func invalidate() {
+        queue.async { self.fileCache.removeAll() }
     }
 
     // MARK: Which image a Dynamic wallpaper shows
 
     private var lastComputedFrame = -1
-    private var lastVerified = Date.distantPast
-    /// The frame seen on the desktop, for this file. Read on `queue` (frameIndex), written on main.
+    private var lastExpected = -1
+    private var expectedSince = Date.distantPast
+    private var lastLook: [CGDirectDisplayID: Date] = [:]
+    private var lookAgainPending = false
+    /// The image seen on the desktop at the last look, for this file. Read on `queue` (frameIndex).
     private static let observedLock = NSLock()
-    private static var observed: (url: URL, frame: Int)?
-    private var frameThumbs: (url: URL, grids: [[Double]])?   // touched only on `queue`
+    private static var observed: (url: URL, frame: Int, date: Date)?
+    /// A look that sees no clear image (the desktop between two images, or hidden for a moment, as
+    /// while Spaces slide) leaves the last one standing for this long.
+    private static let seenFor: TimeInterval = 120
+    private var frameThumbs: (url: URL, aspect: Double, grids: [[Double]])?   // touched only on `queue`
 
-    private func verifyFrame(url: URL, screen: NSScreen, then: @escaping () -> Void) {
+    /// Look at the desktop's picture and tell which of the file's images it is (nil: none clearly, or
+    /// it can't be seen). The picture is read from the Dock's wallpaper window through the window
+    /// list, small: that isn't ScreenCaptureKit, and macOS doesn't show it as screen recording
+    /// (checked on macOS 15: no recording indicator, nothing in Control Center).
+    private func look(url: URL, screen: NSScreen, then: @escaping (Int?) -> Void) {
         let aspect = Double(screen.frame.width / screen.frame.height)
         let displaySpace = screen.colorSpace?.cgColorSpace
         let display = screen.displayID
-        let compare: ([Double]?) -> Void = { [weak self] seen in
-            self?.queue.async { [weak self] in
-                guard let self else { return }
-                var frame: Int?
-                if let seen {
-                    if self.frameThumbs?.url != url {
-                        self.frameThumbs = (url, Self.frameGrids(url, aspect: aspect))
-                    }
-                    let d: [Double] = self.frameThumbs!.grids.map { g in Self.distance(g, seen) }
-                    // Accept a clear match only: the nearest frame close, the next one well apart.
-                    let order = d.indices.sorted { d[$0] < d[$1] }
-                    if let best = order.first, d[best] < 12, order.count < 2 || d[order[1]] > d[best] * 2 + 6 { frame = best }
-                    Debug.write("\(Date()) desktop frame distances \(d.map { Int($0) }) -> \(frame.map(String.init) ?? "unclear")\n", "frame.txt")
+        queue.async { [weak self] in
+            guard let self else { return }
+            var frame: Int?
+            if let shot = Self.windowListCapture(display, rows: nil) {
+                // What comes back are the display's own values: tag them so (see onDisplay).
+                let seen = Self.grid(displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot, aspect: aspect)
+                if self.frameThumbs?.url != url || self.frameThumbs?.aspect != aspect {
+                    self.frameThumbs = (url, aspect, Self.frameGrids(url, aspect: aspect))
                 }
-                Self.observedLock.lock(); Self.observed = frame.map { (url, $0) }; Self.observedLock.unlock()
-                DispatchQueue.main.async { then() }
+                let d: [Double] = self.frameThumbs!.grids.map { g in Self.distance(g, seen) }
+                frame = Self.match(d)
+                Debug.append("\(Date()) desktop image distances \(d.map { Int($0) }) -> \(frame.map(String.init) ?? "unclear")\n", "frame.txt")
+            } else {
+                Debug.append("\(Date()) desktop not seen\n", "frame.txt")
             }
+            let now = Date()
+            Self.observedLock.lock()
+            if let frame { Self.observed = (url, frame, now) }
+            else if let last = Self.observed, last.url != url || now.timeIntervalSince(last.date) > Self.seenFor { Self.observed = nil }
+            Self.observedLock.unlock()
+            DispatchQueue.main.async { then(frame) }
         }
-        // Captures are the display's own values: tag them so (see onDisplay).
-        func tagged(_ shot: CGImage) -> CGImage { displaySpace.flatMap { shot.copy(colorSpace: $0) } ?? shot }
-        if #available(macOS 14, *) {
-            Task {
-                var grid: [Double]?
-                if let win = try? await Self.wallpaperWindow(for: screen) {
-                    let cfg = SCStreamConfiguration()
-                    cfg.width = 256; cfg.height = max(1, Int(256 / aspect)); cfg.showsCursor = false
-                    if let shot = try? await SCScreenshotManager.captureImage(
-                        contentFilter: SCContentFilter(desktopIndependentWindow: win), configuration: cfg) {
-                        grid = Self.grid(tagged(shot), aspect: aspect)
-                    }
-                }
-                compare(grid)
-            }
-        } else {
-            // Before macOS 14 (no SCScreenshotManager, and no ScreenCaptureKit at all before 12.3).
-            DispatchQueue.global(qos: .utility).async {
-                compare(Self.legacyCapture(display, rows: nil).map { Self.grid(tagged($0), aspect: aspect) })
-            }
-        }
+    }
+
+    /// Which image the desktop shows, from its distance to each: a clear match only (the nearest
+    /// close, the next one well apart). nil while the desktop is between two images, or shows none.
+    static func match(_ d: [Double]) -> Int? {
+        let order = d.indices.sorted { d[$0] < d[$1] }
+        guard let best = order.first, d[best] < 12, order.count < 2 || d[order[1]] > d[best] * 2 + 6 else { return nil }
+        return best
     }
 
     private static func distance(_ a: [Double], _ b: [Double]) -> Double {
@@ -247,11 +242,10 @@ final class WallpaperProvider {
         return false
     }
 
-    /// macOS 12 and 13 have no SCScreenshotManager: capture the Dock's wallpaper window on this display
-    /// through CGWindowList. `rows`: the top rows only, at full resolution; nil: the whole window at
-    /// nominal resolution (to tell which image a Dynamic wallpaper shows).
-    @available(macOS, deprecated: 14, message: "SCScreenshotManager from macOS 14 on")
-    private static func legacyCapture(_ display: CGDirectDisplayID, rows: CGFloat?) -> CGImage? {
+    /// The Dock's wallpaper window on this display, read through CGWindowList. `rows`: the top rows
+    /// only, at full resolution (macOS 12 and 13, which have no SCScreenshotManager); nil: the whole
+    /// window at nominal resolution (to tell which image a Dynamic wallpaper shows: see `look`).
+    private static func windowListCapture(_ display: CGDirectDisplayID, rows: CGFloat?) -> CGImage? {
         let bounds = CGDisplayBounds(display)
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier,
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return nil }
@@ -302,7 +296,7 @@ final class WallpaperProvider {
             // Before macOS 14 (no SCScreenshotManager, and no ScreenCaptureKit at all before 12.3).
             let space = screen.colorSpace?.cgColorSpace   // read NSScreen here, on the main thread
             DispatchQueue.global(qos: .utility).async {
-                let image = Self.legacyCapture(display, rows: barHeight).map { shot in space.flatMap { shot.copy(colorSpace: $0) } ?? shot }
+                let image = Self.windowListCapture(display, rows: barHeight).map { shot in space.flatMap { shot.copy(colorSpace: $0) } ?? shot }
                 DispatchQueue.main.async { completion(image) }
             }
             return
@@ -334,6 +328,23 @@ final class WallpaperProvider {
     private static func storeRoot() -> [String: Any]? {
         guard let data = try? Data(contentsOf: storeIndexURL) else { return nil }
         return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+    }
+
+    /// For reading the desktop's notes (DesktopLog): when the desktop's wallpaper was last set (older
+    /// notes are about another wallpaper), and whether the lock screen has a sun-following wallpaper of
+    /// its own, whose notes are then mixed in with the desktop's.
+    static func noteContext() -> (since: Date?, mixed: Bool) {
+        guard let all = storeRoot()?["AllSpacesAndDisplays"] as? [String: Any] else { return (nil, false) }
+        func sunFile(_ part: Any?) -> String? {
+            guard let choice = (((part as? [String: Any])?["Content"] as? [String: Any])?["Choices"] as? [[String: Any]])?.first,
+                  choice["Provider"] as? String == "com.apple.wallpaper.choice.dynamic" else { return nil }
+            let first = (choice["Files"] as? [Any])?.first
+            return (first as? [String: Any])?["relative"] as? String ?? first as? String ?? ""
+        }
+        let desktop = all["Linked"] ?? all["Desktop"]
+        let since = (desktop as? [String: Any])?["LastSet"] as? Date
+        guard all["Linked"] == nil, let idle = sunFile(all["Idle"]) else { return (since, false) }
+        return (since, idle != sunFile(desktop))
     }
 
     /// macOS 14+ keeps the wallpaper choice in Index.plist; NSWorkspace.desktopImageURL often still
@@ -411,7 +422,7 @@ final class WallpaperProvider {
         }
         // A Dynamic wallpaper (images timed by the sun) set to its default, "Dynamic", follows the sun.
         // Its Light and Dark (Still) settings aren't reported; with Screen Recording allowed, Sheer
-        // looks at which image the desktop shows (see verifyFrame).
+        // looks at which image the desktop shows (see `look`).
         if let url = urls.first, urls.allSatisfy({ $0 == url }), isSunTimed(url) { return .file(url, dark: dark, solar: true) }
         return .systemDefault
     }
@@ -437,6 +448,7 @@ final class WallpaperProvider {
         }
         let opts = screen.opts
         let frame = Self.frameIndex(url, dark: dark, solar: solar)
+        if solar { Debug.append("\(Date()) showing image \(frame)\n", "frame.txt") }
         let key = Key(url: url, opts: String(describing: opts), frame: frame,
                       size: CGSize(width: screen.size.width, height: barHeight), scale: screen.scale)
         if let (k, img) = fileCache[screen.id], k == key { return img }
@@ -507,12 +519,42 @@ final class WallpaperProvider {
         return CGImageSourceCreateImageAtIndex(src, frame, lazy)
     }
 
+    /// The image the desktop's own notes give for this sun-following wallpaper (see DesktopLog), if any.
+    static func notedFrame(_ url: URL, now: Date = Date()) -> Int? {
+        let notes = DesktopLog.shared.notes
+        guard !notes.isEmpty, let sun = sunSchedule(url) else { return nil }
+        let context = noteContext()
+        return Solar.noted(notes, si: sun.si, count: sun.count, since: context.since, mixed: context.mixed,
+                           places: Solar.candidates, now: now)
+    }
+
+    /// A Dynamic wallpaper's sun schedule and number of images (kept for the last file asked about).
+    private static func sunSchedule(_ url: URL) -> (si: [[String: Any]], count: Int)? {
+        observedLock.lock(); let kept = schedule; observedLock.unlock()
+        if let kept, kept.url == url { return kept.si.isEmpty ? nil : (kept.si, kept.count) }
+        var si: [[String: Any]] = [], count = 0
+        if url.pathExtension.lowercased() == "heic",
+           let src = CGImageSourceCreateWithURL(url.resolvingSymlinksInPath() as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+           let md = CGImageSourceCopyMetadataAtIndex(src, 0, nil),
+           let tag = CGImageMetadataCopyTagWithPath(md, nil, "apple_desktop:solar" as CFString),
+           let b64 = CGImageMetadataTagCopyValue(tag) as? String, let data = Data(base64Encoded: b64),
+           let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+            si = plist["si"] as? [[String: Any]] ?? []
+            count = CGImageSourceGetCount(src)
+        }
+        observedLock.lock(); schedule = (url, si, count); observedLock.unlock()
+        return si.isEmpty ? nil : (si, count)
+    }
+    private static var schedule: (url: URL, si: [[String: Any]], count: Int)?
+
     /// Which image of a (possibly dynamic) HEIC the desktop shows.
     static func frameIndex(_ url: URL, dark: Bool, solar: Bool, observed useObserved: Bool = true, at date: Date = Date(),
                            place: (lat: Double, lon: Double)? = nil) -> Int {
         if solar && useObserved {
+            // What was just seen on the desktop; failing that, what the desktop noted it chose.
             observedLock.lock(); let seen = observed; observedLock.unlock()
             if let seen, seen.url == url { return seen.frame }
+            if let noted = notedFrame(url) { return noted }
         }
         guard url.pathExtension.lowercased() == "heic",
               let src = CGImageSourceCreateWithURL(url.resolvingSymlinksInPath() as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -554,17 +596,45 @@ enum Solar {
 
     /// Where the desktop places the sun's observer. Allowed to use Location Services (the "Setting
     /// time zone" system service), it takes the Mac's real position: Sheer uses the same once it has
-    /// been allowed to (see Location), and until then the time zone's city stands in.
-    /// With the service off, the desktop was seen standing at the time zone's city (a Mac set to
-    /// America/Regina but actually near Edmonton changed frames on Regina's times, minutes to half an hour
-    /// away from Edmonton's or the meridian point's, on two days).
+    /// been allowed to (see Location), and until then the time zone's city stands in. Otherwise the
+    /// desktop falls back to a point on the equator at the time zone's meridian. (Its own log shows
+    /// it: on a Mac set to America/Regina with the service off, four days of image changes all fell
+    /// within the minute computed for that point, up to an hour and a half from the zone's city's.)
     static var location: (lat: Double, lon: Double) {
         if desktopUsesRealLocation, let place = Location.shared.coordinate ?? zoneCity { return place }
-        return zoneCity ?? meridianPoint
+        return meridianPoint
     }
 
-    /// The equator at the time zone's meridian (standard offset × Earth's rotation rate): the last resort
-    /// when the zone has no city.
+    /// The positions the desktop may be using, likeliest first.
+    static var candidates: [(lat: Double, lon: Double)] {
+        var all = [location]
+        for p in [Location.shared.coordinate, meridianPoint] {
+            if let p, !all.contains(where: { abs($0.lat - p.lat) < 0.01 && abs($0.lon - p.lon) < 0.01 }) { all.append(p) }
+        }
+        return all
+    }
+
+    /// The image the desktop last said it shows (its notes: see DesktopLog), for a wallpaper with this
+    /// schedule and `count` images, set at `since`. Its newest note counts, unless that is out of date:
+    /// the desktop chooses again at the note's "next" time, and at least every twelve hours.
+    /// `mixed`: another sun-following wallpaper writes notes too (the lock screen's), so only a note
+    /// that fits this wallpaper's schedule at one of `places` counts.
+    static func noted(_ notes: [DesktopLog.Note], si: [[String: Any]], count: Int, since: Date?, mixed: Bool,
+                      places: [(lat: Double, lon: Double)], now: Date = Date()) -> Int? {
+        let mine = notes.filter { note in
+            note.index < count && note.date <= now.addingTimeInterval(5) && (since.map { note.date > $0.addingTimeInterval(-5) } ?? true)
+        }
+        let fits = { (note: DesktopLog.Note) in
+            places.contains { place in
+                [0.0, 120].contains { frame(si, at: note.date.addingTimeInterval($0), place: place) == note.index }
+            }
+        }
+        guard let note = mixed ? mine.last(where: fits) : mine.last else { return nil }
+        let goodUntil = note.next?.addingTimeInterval(10 * 60) ?? note.date.addingTimeInterval(13 * 3600)
+        return now < goodUntil ? note.index : nil
+    }
+
+    /// The equator at the time zone's meridian (standard offset × Earth's rotation rate).
     private static var meridianPoint: (lat: Double, lon: Double) {
         let zone = TimeZone.current
         let standardOffset = Double(zone.secondsFromGMT()) - zone.daylightSavingTimeOffset()

@@ -44,55 +44,117 @@ let ventura: [[String: Any]] = [
     ["a": 10, "z": 100, "i": 4], ["a": 25, "z": 250, "i": 0], ["a": 10, "z": 260, "i": 4], ["a": 0, "z": 270, "i": 3],
     ["a": -9, "z": 280, "i": 2], ["a": -25, "z": 290, "i": 1],
 ]
-let reginaCity = (lat: 50.40, lon: -104.65)            // zone.tab's America/Regina
-let edmonton = (lat: 53.52, lon: -113.53)               // where that Mac actually was
 let meridian = (lat: 0.0, lon: -90.0)                   // the equator at UTC−6's meridian
+let edmonton = (lat: 53.52, lon: -113.53)               // where that Mac actually was
 func ventFrame(_ date: Date, _ place: (lat: Double, lon: Double)) -> Int { Solar.frame(ventura, at: date, place: place) ?? -1 }
+func at(_ d: Int, _ h: Int, _ mi: Int, _ s: Int) -> Date { local(2026, 11, d, h, mi).addingTimeInterval(Double(s)) }
 
-section("Dynamic wallpaper: frames seen on the desktop")
+section("Dynamic wallpaper: the desktop's own image changes")
 do {
-    // Sun 15 Nov, 16:50: the desktop showed image 3 (its own capture, 16:57: distances [38, 30, 19, 0, 22]).
-    check(ventFrame(local(2026, 11, 15, 16, 50), reginaCity) == 3, "15 Nov 16:50 → 3")
-    // Sun 15 Nov, just after 18:00: the desktop showed image 2.
-    check(ventFrame(local(2026, 11, 15, 18, 6), reginaCity) == 2, "15 Nov 18:06 → 2")
-    // Tue 17 Nov: image 1 by 19:00 (Regina's own change is computed for ~19:03, a few minutes late).
-    check(ventFrame(local(2026, 11, 17, 19, 10), reginaCity) == 1, "17 Nov 19:10 → 1")
-    // Midday and midnight.
-    check(ventFrame(local(2026, 11, 17, 12, 0), reginaCity) == 0, "noon → 0 (day)")
-    check(ventFrame(local(2026, 11, 17, 0, 30), reginaCity) == 1, "midnight → 1 (night)")
-    // Where the Mac really was would have been half an hour late: the reason for using the zone's city.
-    check(ventFrame(local(2026, 11, 17, 19, 10), edmonton) == 2, "Edmonton is still on 2 at 19:10")
+    // From the desktop's log on that Mac (time-zone location service off), Wed 18 Nov: the moment it
+    // chose each image. Sheer's computation, standing on the equator at the zone's meridian, must give
+    // the image before each moment and the new one after (3 minutes' margin: the log's own times are
+    // within the minute of Sheer's with the system's sun, a little further with the built-in formula).
+    let seen: [(Date, Int)] = [
+        (at(18, 4, 29, 38), 2), (at(18, 5, 22, 45), 3), (at(18, 6, 5, 29), 4), (at(18, 6, 59, 5), 0),
+        (at(18, 16, 30, 56), 4), (at(18, 17, 24, 34), 3), (at(18, 18, 7, 20), 2), (at(18, 19, 0, 30), 1),
+    ]
+    var before = 1   // night, until the first change
+    for (moment, image) in seen {
+        check(ventFrame(moment.addingTimeInterval(-180), meridian) == before, "before \(moment): image \(before)")
+        check(ventFrame(moment.addingTimeInterval(180), meridian) == image, "after \(moment): image \(image)")
+        before = image
+    }
+    // Sun 15 Nov, the service still on: the desktop stood where the Mac was, and chose 3 at 16:48:11.
+    check(ventFrame(at(15, 16, 55, 0), edmonton) == 3, "15 Nov 16:55 near Edmonton → 3")
+    check(ventFrame(at(15, 16, 55, 0), meridian) == 4, "…where the meridian point still gives 4")
 }
 
-section("Dynamic wallpaper: which position Sheer times frames by")
+section("Dynamic wallpaper: which position Sheer computes from")
 do {
     // test.sh runs this with TZ=America/Regina. With the time-zone location service off (as on that Mac,
-    // and on CI), Sheer must stand at the zone's city: the equator or the Mac's last known position put it
-    // up to half an hour out of step with the desktop.
+    // and on CI), the desktop stands on the equator at the zone's meridian, and so must Sheer: the
+    // zone's city (used from 1.3.2 to 1.4.1) is up to an hour and a half out of step.
     if TimeZone.current.identifier == "America/Regina" && !Solar.desktopUsesRealLocation {
         let p = Solar.location
-        check(abs(p.lat - reginaCity.lat) < 0.01 && abs(p.lon - reginaCity.lon) < 0.01, "location off → the time zone's city (got \(p))")
+        check(abs(p.lat) < 0.01 && abs(p.lon + 90) < 0.5, "location off → the zone's meridian on the equator (got \(p))")
     } else {
         print("  (skipped: needs TZ=America/Regina and the time-zone location service off)")
     }
 }
 
-section("Dynamic wallpaper: when to look at the desktop every few seconds")
+section("Dynamic wallpaper: which image a look at the desktop sees")
 do {
-    let near = { (d: Date, places: [(lat: Double, lon: Double)]) in
-        WallpaperProvider.changeIsNear(at: d, places: places) { date, place in ventFrame(date, place) }
+    // Distances of the desktop's picture to each of Ventura Graphic's five images, as measured.
+    check(WallpaperProvider.match([0, 64, 53, 38, 16]) == 0, "the day image")
+    check(WallpaperProvider.match([38, 30, 19, 0, 23]) == 3, "the evening image")
+    check(WallpaperProvider.match([63, 0, 12, 30, 49]) == 1, "the night image")
+    // Halfway through a change, or something else on the desktop: no answer rather than a guess.
+    check(WallpaperProvider.match([9, 60, 50, 35, 9]) == nil, "between two images")
+    check(WallpaperProvider.match([40, 45, 50, 38, 42]) == nil, "none of them")
+    check(WallpaperProvider.match([]) == nil, "nothing to compare")
+    check(WallpaperProvider.match([3]) == 0, "a single image")
+}
+
+section("Dynamic wallpaper: reading the desktop's notes")
+do {
+    let us = Locale(identifier: "en_US")
+    // A note as the log holds it.
+    let message = """
+        indexAndNextDate: {
+            dynamicStyle: automatic
+            appearance: light,
+            queryOptions: []),
+            location: <private>,
+            isMainThread: true
+        } -> 3, nextDate: Nov 15, 2026 at 6:08:57 PM
+        """
+    let note = DesktopLog.parse(message, at: at(15, 16, 48, 11), locale: us, zone: regina)
+    check(note?.index == 3, "the image: \(String(describing: note?.index))")
+    check(note?.next == at(15, 18, 8, 57), "the next time: \(String(describing: note?.next))")
+    // The log's other lines aren't notes.
+    check(DesktopLog.parse("SolarTrigger timer fired.", at: Date(), locale: us, zone: regina) == nil, "timer line")
+    check(DesktopLog.parse("Updated solar trigger, scheduling next update for Nov 18, 2026 at 6:05:29 AM", at: Date(), locale: us, zone: regina) == nil, "schedule line")
+    // No further change that day reads as the year 4000: the image counts, the time doesn't.
+    let last = DesktopLog.parse("indexAndNextDate: {} -> 1, nextDate: Dec 31, 4000 at 6:00:00 PM", at: at(17, 19, 24, 22), locale: us, zone: regina)
+    check(last?.index == 1 && last?.next == nil, "far-future next time is dropped")
+    // A region that writes dates another way: read with the same region's format.
+    let zh = Locale(identifier: "zh_CN")
+    let f = DateFormatter(); f.locale = zh; f.timeZone = regina; f.dateStyle = .medium; f.timeStyle = .medium
+    let chinese = DesktopLog.parse("indexAndNextDate: {} -> 2, nextDate: \(f.string(from: at(18, 19, 0, 30)))", at: at(18, 18, 7, 20), locale: zh, zone: regina)
+    check(chinese?.index == 2 && chinese?.next == at(18, 19, 0, 30), "Chinese-format date: \(String(describing: chinese?.next))")
+    // Unreadable date: still the image.
+    let odd = DesktopLog.parse("indexAndNextDate: {} -> 4, nextDate: sometime", at: Date(), locale: us, zone: regina)
+    check(odd?.index == 4 && odd?.next == nil, "unreadable date keeps the image")
+}
+
+section("Dynamic wallpaper: which note counts")
+do {
+    typealias Note = DesktopLog.Note
+    let places = [meridian]
+    func noted(_ notes: [Note], since: Date? = nil, mixed: Bool = false, now: Date) -> Int? {
+        Solar.noted(notes, si: ventura, count: 5, since: since, mixed: mixed, places: places, now: now)
     }
-    // Tue 17 Nov 18:59, the desktop changing to image 1 any moment (seen by 19:00): watched.
-    check(near(local(2026, 11, 17, 18, 59), [reginaCity]), "18:59 near Regina's 19:03 change")
-    // 18:50: Regina's changes (17:41, 19:03) are both over 5 minutes away.
-    check(!near(local(2026, 11, 17, 18, 50), [reginaCity]), "18:50 not near")
-    check(!near(local(2026, 11, 17, 18, 30), [reginaCity]), "18:30 not near")
-    // Midday, over an hour from every change (Regina 11:09/14:17): no fast watching.
-    check(!near(local(2026, 11, 17, 12, 30), [reginaCity]), "12:30 not near")
-    // Each close look is a screen capture: the fast-watched part of a day stays short (8 changes ≈ 80 min).
-    var watched = 0
-    for m in 0..<1440 where near(local(2026, 11, 18, 0, 0).addingTimeInterval(Double(m) * 60), [reginaCity]) { watched += 1 }
-    check(watched <= 100, "minutes a day watched closely: \(watched)")
+    let evening = [Note(date: at(18, 16, 30, 56), index: 4, next: at(18, 17, 24, 34)),
+                   Note(date: at(18, 17, 24, 34), index: 3, next: at(18, 18, 7, 20))]
+    check(noted(evening, now: at(18, 17, 30, 0)) == 3, "the newest note")
+    check(noted(Array(evening.prefix(1)), now: at(18, 17, 0, 0)) == 4, "one note")
+    check(noted([], now: at(18, 17, 0, 0)) == nil, "no notes → compute")
+    // Another wallpaper's note (more images than this one has) is not about this wallpaper.
+    let foreign = evening + [Note(date: at(18, 17, 26, 0), index: 6, next: nil)]
+    check(noted(foreign, now: at(18, 17, 30, 0)) == 3, "an index this wallpaper doesn't have is skipped")
+    // Notes from before this wallpaper was set are about the previous one.
+    check(noted(evening, since: at(18, 17, 0, 0), now: at(18, 17, 30, 0)) == 3, "since: the later note still counts")
+    check(noted(evening, since: at(18, 17, 28, 0), now: at(18, 17, 30, 0)) == nil, "since: both too old")
+    // Past its "next" time by a good margin with nothing newer, a note is out of date.
+    check(noted(evening, now: at(18, 18, 9, 0)) == 3, "just past the next time: still shown")
+    check(noted(evening, now: at(18, 18, 30, 0)) == nil, "long past the next time → compute")
+    check(noted([Note(date: at(18, 6, 59, 5), index: 0, next: nil)], now: at(18, 12, 0, 0)) == 0, "no next time: good for hours")
+    check(noted([Note(date: at(18, 6, 59, 5), index: 0, next: nil)], now: at(18, 21, 0, 0)) == nil, "…but not for ever")
+    // The lock screen has a sun-following wallpaper of its own: only notes that fit this one's schedule.
+    let other = evening + [Note(date: at(18, 17, 26, 0), index: 1, next: nil)]
+    check(noted(other, mixed: true, now: at(18, 17, 30, 0)) == 3, "mixed: the note that doesn't fit is skipped")
+    check(noted(other, mixed: false, now: at(18, 17, 30, 0)) == 1, "not mixed: the newest note is taken as is")
 }
 
 // MARK: - Updates
